@@ -5,11 +5,15 @@
 
 mod sender_state;
 mod sendme; // Replace with the name of the module that contains your functions
+mod events; // New module for event types
 
 use sender_state::{SenderState, SharedSenderState};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{State, Manager, Window};
 use dirs;
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
 
 #[tauri::command]
 async fn send_file_command(
@@ -33,19 +37,140 @@ async fn stop_sharing_command(
     }
 }
 
+// Original function with the signature that Tauri expects
 #[tauri::command]
 async fn receive_file_command(
+    window: Window,
     ticket: String,
     file_storage_path: String,
     verbose: bool,
 ) -> Result<String, String> {
+    // Tauri automatically provides the window parameter to the command
+    
+    // Call our internal implementation that has the window parameter
+    receive_file_with_stats(window, ticket, file_storage_path, verbose).await
+}
+
+// New internal function that handles the actual download with statistics
+async fn receive_file_with_stats(
+    window: Window,
+    ticket: String,
+    file_storage_path: String,
+    verbose: bool,
+) -> Result<String, String> {
+    // Record start time for statistics
+    let start_time = Instant::now();
+    
+    // Emit event that download is starting
+    let _ = window.emit("download_started", ());
+    
+    // Create a window clone for use in the blocking task
+    let window_clone = window.clone();
+    
     // Run the non-Send future in a blocking task.
-    tauri::async_runtime::spawn_blocking(move || {
-        futures::executor::block_on(sendme::receive_file_minimal(ticket, file_storage_path, verbose))
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        // Run the original function inside the blocking task
+        futures::executor::block_on(async {
+            // First update status
+            let _ = window_clone.emit("download_status", "Connecting to sender...");
+            
+            // Call the original function to do the actual download
+            let result = sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
+            
+            // If download was successful, get file information and emit completion event
+            if result.is_ok() {
+                let elapsed_ms = start_time.elapsed().as_millis() as u64;
+                
+                // Get information about the downloaded file(s)
+                let file_info = get_downloaded_file_info(&file_storage_path);
+                
+                // Emit completion event with statistics
+                let _ = window_clone.emit("download_completed", events::DownloadCompletedEvent {
+                    success: true,
+                    message: "Download completed successfully".to_string(),
+                    elapsed_time_ms: elapsed_ms,
+                    download_path: file_storage_path,
+                    filename: file_info.filename,
+                    total_bytes: file_info.total_size,
+                    files_count: file_info.file_count,
+                });
+            }
+            
+            result
+        })
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    .map_err(|e| {
+        // Emit error event if download failed
+        let _ = window.emit("download_error", e.to_string());
+        e.to_string()
+    });
+    
+    result
+}
+
+// Helper struct for file information
+struct DownloadedFileInfo {
+    filename: String,
+    total_size: u64,
+    file_count: u32,
+}
+
+// Function to get information about downloaded file(s)
+fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
+    let path_obj = Path::new(path);
+    let mut total_size = 0;
+    let mut file_count = 0;
+    let mut filename = String::from("Downloaded File");
+    
+    // Check if path exists
+    if path_obj.exists() {
+        if path_obj.is_file() {
+            // Single file download
+            if let Ok(metadata) = fs::metadata(path_obj) {
+                total_size = metadata.len();
+                file_count = 1;
+            }
+            if let Some(name) = path_obj.file_name() {
+                if let Some(name_str) = name.to_str() {
+                    filename = name_str.to_string();
+                }
+            }
+        } else if path_obj.is_dir() {
+            // Directory with multiple files
+            if let Ok(entries) = fs::read_dir(path_obj) {
+                // Process each file in the directory
+                let mut entries_vec = Vec::new();
+                for entry in entries.flatten() {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            total_size += metadata.len();
+                            file_count += 1;
+                        }
+                    }
+                    entries_vec.push(entry);
+                }
+                
+                // Try to get main directory name or first file name
+                if let Some(name) = path_obj.file_name() {
+                    if let Some(name_str) = name.to_str() {
+                        filename = name_str.to_string();
+                    }
+                } else if !entries_vec.is_empty() {
+                    if let Some(name) = entries_vec[0].file_name().to_str() {
+                        filename = name.to_string();
+                    }
+                }
+            }
+        }
+    }
+    
+    DownloadedFileInfo {
+        filename,
+        total_size,
+        file_count,
+    }
 }
 
 #[tauri::command]
@@ -53,6 +178,15 @@ fn get_downloads_dir() -> Result<String, String> {
     match dirs::download_dir() {
         Some(path) => Ok(path.to_string_lossy().to_string()),
         None => Err("Could not determine downloads directory".to_string()),
+    }
+}
+
+#[tauri::command]
+fn get_file_size(path: String) -> Result<u64, String> {
+    let path = Path::new(&path);
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(e) => Err(format!("Failed to get file size: {}", e))
     }
 }
 
@@ -92,7 +226,13 @@ fn main() {
     tauri::Builder::default()
         // Manage our shared sender state.
         .manage(Mutex::new(SenderState::default()))
-        .invoke_handler(tauri::generate_handler![send_file_command, stop_sharing_command, receive_file_command, get_downloads_dir])
+        .invoke_handler(tauri::generate_handler![
+            send_file_command, 
+            stop_sharing_command, 
+            receive_file_command, 
+            get_downloads_dir,
+            get_file_size
+        ])
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
                 cleanup_sendme_dirs();

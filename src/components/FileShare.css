@@ -1,0 +1,304 @@
+/* src/components/FileShare.css */
+.file-share-container {
+    background-color: var(--card-background);
+    border-radius: var(--border-radius);
+    box-shadow: 0 8px 30px var(--shadow-color);
+    padding: 2rem;
+    max-width: 700px;
+    margin: 0 auto;
+    animation: slideUp 0.4s ease;
+  }
+  
+  .file-share-container h2 {
+    text-align: center;
+    color: var(--primary-color);
+    font-size: 1.8rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  /* File selection area */
+  .file-selection-area {
+    margin-bottom: 1.5rem;
+  }
+  
+  .file-browse-container {
+    text-align: center;
+    padding: 2rem 0;
+  }
+  
+  .file-browse-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 1rem 2rem;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: var(--border-radius-sm);
+    font-weight: 500;
+    margin-bottom: 1rem;
+    transition: all var(--animation-speed) ease;
+  }
+  
+  .file-browse-button:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(67, 97, 238, 0.2);
+  }
+  
+  .file-browse-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(67, 97, 238, 0.2);
+  }
+  
+  .file-browse-hint {
+    color: var(--light-text);
+    font-size: 0.9rem;
+  }
+  
+  /* Selected files list */
+  .selected-files-container {
+    margin-top: 2rem;
+    animation: fadeIn 0.4s ease;
+  }
+  
+  .selected-files-container h3 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    color: var(--text-color);
+  }
+  
+  .file-list {
+    list-style: none;
+    margin-bottom: 1.5rem;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    padding: 0.5rem;
+  }
+  
+  .file-item {
+    display: flex;
+    align-items: center;
+    padding: 0.8rem;
+    background-color: rgba(245, 247, 251, 0.5);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 0.5rem;
+    transition: all var(--animation-speed) ease;
+    border: 1px solid var(--border-color);
+  }
+  
+  .file-item:hover {
+    background-color: rgba(245, 247, 251, 0.9);
+    border-color: var(--primary-color);
+  }
+  
+  .file-icon {
+    margin-right: 1rem;
+    color: var(--primary-color);
+    min-width: 24px;
+  }
+  
+  .file-details {
+    flex: 1;
+    overflow: hidden;
+  }
+  
+  .file-name {
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .file-size {
+    font-size: 0.85rem;
+    color: var(--lighter-text);
+  }
+  
+  .remove-file-button {
+    color: var(--lighter-text);
+    padding: 0.3rem;
+    border-radius: 50%;
+    transition: all var(--animation-speed) ease;
+    min-width: 26px;
+  }
+  
+  .remove-file-button:hover {
+    color: var(--error-color);
+    background-color: rgba(244, 67, 54, 0.1);
+  }
+  
+  /* Action buttons */
+  .action-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+  
+  .add-more-button {
+    padding: 0.7rem 1.2rem;
+    border-radius: var(--border-radius-sm);
+    background-color: var(--card-background);
+    color: var(--primary-color);
+    font-weight: 500;
+    border: 1px solid var(--primary-color);
+  }
+  
+  .add-more-button:hover {
+    background-color: rgba(67, 97, 238, 0.1);
+  }
+  
+  .share-button {
+    padding: 0.7rem 1.5rem;
+    border-radius: var(--border-radius-sm);
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 500;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .share-button:hover {
+    background-color: var(--primary-hover);
+  }
+  
+  .share-button:disabled {
+    background-color: var(--border-color);
+    color: var(--light-text);
+  }
+  
+  /* Status message */
+  .status-message {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-radius: var(--border-radius-sm);
+    background-color: rgba(76, 175, 80, 0.1);
+    color: var(--success-color);
+    text-align: center;
+    animation: fadeIn 0.3s ease;
+  }
+  
+  .status-message.error {
+    background-color: rgba(244, 67, 54, 0.1);
+    color: var(--error-color);
+  }
+  
+  /* Share code display */
+  .share-code-container {
+    text-align: center;
+    animation: fadeIn 0.4s ease;
+  }
+  
+  .share-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .share-code-header h3 {
+    font-size: 1.4rem;
+    color: var(--primary-color);
+    margin-bottom: 0;
+  }
+  
+  .pulse-animation {
+    width: 12px;
+    height: 12px;
+    background-color: var(--primary-color);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  
+  .share-code {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .share-code-char {
+    width: 50px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(67, 97, 238, 0.1);
+    border-radius: var(--border-radius-sm);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    animation: slideUp 0.3s ease;
+    font-family: monospace;
+  }
+  
+  .share-code-instructions {
+    color: var(--light-text);
+    margin-bottom: 1.5rem;
+  }
+  
+  .copy-code-button {
+    padding: 0.8rem 2rem;
+    border-radius: var(--border-radius-sm);
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 500;
+    margin-bottom: 1rem;
+    display: inline-block;
+  }
+  
+  .copy-code-button:hover {
+    background-color: var(--primary-hover);
+  }
+  
+  .reset-button {
+    padding: 0.7rem 1.5rem;
+    border-radius: var(--border-radius-sm);
+    background-color: rgba(0, 0, 0, 0.05);
+    color: var(--light-text);
+    font-weight: 500;
+    display: inline-block;
+  }
+  
+  .reset-button:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Spinner animation */
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
+  .spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 0.5rem;
+  }
+  
+  /* Animations */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+  }
