@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/1",
   "build": {
+    "beforeBundleCommand": "bash ./scripts/prepare-scripts.sh",
     "beforeDevCommand": "yarn dev",
     "beforeBuildCommand": "yarn build",
     "devPath": "http://localhost:1420",
@@ -18,12 +19,25 @@
         "open": true
       },
       "dialog": {
-        "all": true, 
-        "open": true
+        "all": true,
+        "open": true,
+        "save": true
       },
       "fs": {
         "all": true,
+        "readFile": true,
+        "writeFile": true,
+        "readDir": true,
+        "copyFile": true,
+        "createDir": true,
+        "removeDir": true,
+        "removeFile": true,
+        "renameFile": true,
+        "exists": true,
         "scope": ["**"]
+      },
+      "path": {
+        "all": true
       }
     },
     "windows": [

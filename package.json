@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "postbuild": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^1",
