@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/1",
   "build": {
-    "beforeBundleCommand": "bash ./scripts/prepare-scripts.sh",
     "beforeDevCommand": "yarn dev",
     "beforeBuildCommand": "yarn build",
     "devPath": "http://localhost:1420",
