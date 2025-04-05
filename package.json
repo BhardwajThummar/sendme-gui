@@ -8,9 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "beforeBundleCommand": "bash ./scripts/prepare-scripts.sh",
-    "mac:package": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh",
-    "build:mac": "yarn run beforeBundleCommand && tsc && vite build && yarn run mac:package"
+    "postbuild": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^1",
