@@ -204,7 +204,8 @@ const FileReceive: React.FC = () => {
     try {
       const selected = await open({
         directory: true,
-        multiple: false
+        multiple: true,
+        title: 'Select Download Location',
       });
       
       if (selected && !Array.isArray(selected)) {

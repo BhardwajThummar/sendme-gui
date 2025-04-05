@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "beforeBundleCommand": "bash ./scripts/prepare-scripts.sh",
     "mac:package": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh",
-    "build:mac": "npm run beforeBundleCommand && tsc && vite build && npm run mac:package"
+    "build:mac": "yarn run beforeBundleCommand && tsc && vite build && yarn run mac:package"
   },
   "dependencies": {
     "@tauri-apps/api": "^1",
