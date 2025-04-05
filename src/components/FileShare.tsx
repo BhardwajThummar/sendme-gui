@@ -31,13 +31,70 @@ const FileShare: React.FC = () => {
       console.log("Opening file dialog...");
       const selected = await open({
         multiple: true,
-        filters: [{
-          name: 'All Files',
-          extensions: ['*']
-        }]
+        // directory: true,
+        title: 'Select Files to Share'
       });
       
       console.log("Files selected:", selected);
+      
+      if (selected && Array.isArray(selected) && selected.length > 0) {
+        setStatus('processing');
+        setStatusMessage('Getting file information...');
+        
+        // Get actual file sizes using backend command
+        const filePromises = selected.map(async (path) => {
+          // Extract filename from path
+          const pathParts = path.split(/[/\\]/);
+          const fileName = pathParts[pathParts.length - 1];
+          
+          try {
+            // Get actual file size from Tauri backend
+            const size = await invoke<number>('get_file_size', { path });
+            return {
+              name: fileName,
+              path: path,
+              size: formatFileSize(size)
+            };
+          } catch (error) {
+            console.error(`Error getting size for file ${path}:`, error);
+            return {
+              name: fileName,
+              path: path,
+              size: 'Size unavailable'
+            };
+          }
+        });
+        
+        try {
+          // Wait for all file size promises to resolve
+          const newFiles = await Promise.all(filePromises);
+          console.log("Processed files with actual sizes:", newFiles);
+          setSelectedFiles(prev => [...prev, ...newFiles]);
+          setStatus('idle');
+          setStatusMessage('');
+        } catch (error) {
+          console.error('Error processing files:', error);
+          setStatus('error');
+          setStatusMessage('Error getting file information');
+        }
+      }
+    } catch (error) {
+      console.error('Error selecting files:', error);
+      setStatus('error');
+      setStatusMessage(`Error selecting files: ${error}`);
+    }
+  };
+  // Handle directory selection using Tauri's dialog API
+  const handleDirSelect = async () => {
+    try {
+      console.log("Opening file dialog...");
+      const selected = await open({
+        multiple: true,
+        directory: true,
+        title: 'Select Directories to Share'
+      });
+      
+      console.log("Directories selected:", selected);
       
       if (selected && Array.isArray(selected) && selected.length > 0) {
         setStatus('processing');
@@ -195,6 +252,27 @@ const FileShare: React.FC = () => {
                       <line x1="12" y1="3" x2="12" y2="15"></line>
                     </svg>
                     Select Files to Share
+                  </>
+                )}
+              </button>
+              <button 
+                className="file-browse-button"
+                onClick={handleDirSelect}
+                disabled={status === 'processing'}
+              >
+                {status === 'processing' ? (
+                  <>
+                    <div className="spinner"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Select Directories to Share
                   </>
                 )}
               </button>
