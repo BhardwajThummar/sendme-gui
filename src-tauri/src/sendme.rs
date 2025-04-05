@@ -9,11 +9,13 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
+use std::env; // Import the env module
+lazy_static::lazy_static! {
+    static ref API_URL: String = env::var("API_URL").unwrap_or_default();
+}
 use anyhow::Context;
 use clap::{
-    error::{ContextKind, ErrorKind},
-    CommandFactory, Parser, Subcommand,
+     Parser, Subcommand,
 };
 use console::style;
 use data_encoding::HEXLOWER;
@@ -584,88 +586,6 @@ impl CustomEventSender for ClientStatus {
     }
 }
 
-pub async fn send(args: SendArgs) -> anyhow::Result<BlobTicket> {
-    let secret_key = get_or_create_secret(args.common.verbose > 0)?;
-    // create a magicsocket endpoint
-    let mut builder = Endpoint::builder()
-        .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
-        .secret_key(secret_key)
-        .relay_mode(args.common.relay.into());
-    if args.ticket_type == AddrInfoOptions::Id {
-        builder =
-            builder.add_discovery(|secret_key| Some(PkarrPublisher::n0_dns(secret_key.clone())));
-    }
-    if let Some(addr) = args.common.magic_ipv4_addr {
-        builder = builder.bind_addr_v4(addr);
-    }
-    if let Some(addr) = args.common.magic_ipv6_addr {
-        builder = builder.bind_addr_v6(addr);
-    }
-
-    // use a flat store - todo: use a partial in mem store instead
-    let suffix = rand::thread_rng().gen::<[u8; 16]>();
-    let blobs_data_dir = CWD.join(format!(".sendme-send-{}", HEXLOWER.encode(&suffix)));
-    if blobs_data_dir.exists() {
-        println!(
-            "can not share twice from the same directory: {}",
-            CWD.display(),
-        );
-        std::process::exit(1);
-    }
-
-    tokio::fs::create_dir_all(&blobs_data_dir).await?;
-
-    let endpoint = builder.bind().await?;
-    let ps = SendStatus::new();
-    let blobs = Blobs::persistent(&blobs_data_dir)
-        .await?
-        .events(ps.new_client().into())
-        .build(&endpoint);
-
-    let router = iroh::protocol::Router::builder(endpoint)
-        .accept(iroh_blobs::ALPN, blobs.clone())
-        .spawn()
-        .await?;
-
-    let path = args.path;
-    let (temp_tag, size, collection) = import(path.clone(), blobs.store().clone()).await?;
-    let hash = *temp_tag.hash();
-
-    // wait for the endpoint to figure out its address before making a ticket
-    let _ = router.endpoint().home_relay().initialized().await?;
-
-    // make a ticket
-    let mut addr = router.endpoint().node_addr().await?;
-    apply_options(&mut addr, args.ticket_type);
-    let ticket = BlobTicket::new(addr, hash, BlobFormat::HashSeq)?;
-    let entry_type = if path.is_file() { "file" } else { "directory" };
-    println!(
-        "imported {} {}, {}, hash {}",
-        entry_type,
-        path.display(),
-        HumanBytes(size),
-        print_hash(&hash, args.common.format)
-    );
-    if args.common.verbose > 0 {
-        for (name, hash) in collection.iter() {
-            println!("    {} {name}", print_hash(hash, args.common.format));
-        }
-    }
-    println!("to get this data, use");
-    println!("sendme receive {}", ticket);
-
-    drop(temp_tag);
-
-    // Wait for exit
-    tokio::signal::ctrl_c().await?;
-
-    println!("shutting down");
-    tokio::time::timeout(Duration::from_secs(2), router.shutdown()).await??;
-    tokio::fs::remove_dir_all(blobs_data_dir).await?;
-
-    Ok(ticket)
-}
-
 fn make_download_progress() -> ProgressBar {
     let pb = ProgressBar::hidden();
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -682,8 +602,6 @@ fn make_download_progress() -> ProgressBar {
 // use serde::{Deserialize, Serialize};
 use std::error::Error;
 use reqwest::Client;
-
-const BASE_URL: &str = "http://localhost:8000/api/code/";
 
 #[derive(Serialize)]
 struct BlobRequest {
@@ -706,7 +624,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
         blobs: vec![blob],
     };
     let response = client
-        .post(BASE_URL)
+        .post(&*API_URL)
         .json(&payload)
         .send()
         .await?
@@ -717,9 +635,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
 
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     let client = Client::new();
-    let url: String = format!("{}{}", BASE_URL, code);
-
-    println!("2 2 22 2 :>>>>>>>>>>> {}", url);
+    let url: String = format!("{}{}", &*API_URL, code);
 
     let response = client
         .get(&url)
@@ -919,80 +835,6 @@ async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result
     Ok(())
 }
 
-// #[tokio::main]
-// async fn main() -> anyhow::Result<()> {
-//     tracing_subscriber::fmt::init();
-//     let args = match Args::try_parse() {
-//         Ok(args) => args,
-//         Err(cause) => {
-//             if let Some(text) = cause.get(ContextKind::InvalidSubcommand) {
-//                 eprintln!("{} \"{}\"\n", ErrorKind::InvalidSubcommand, text);
-//                 eprintln!("Available subcommands are");
-//                 for cmd in Args::command().get_subcommands() {
-//                     eprintln!("    {}", style(cmd.get_name()).bold());
-//                 }
-//                 std::process::exit(1);
-//             } else {
-//                 cause.exit();
-//             }
-//         }
-//     };
-//     let res = match args.command {
-//         Commands::Send(args) => send(args).await,
-//         Commands::Receive(args) => receive(args).await,
-//     };
-//     if let Err(e) = &res {
-//         eprintln!("{e}");
-//     }
-//     match res {
-//         Ok(()) => std::process::exit(0),
-//         Err(_) => std::process::exit(1),
-//     }
-// }
-
-// pub async fn send_file_minimal(file_path: String, verbose: bool) -> anyhow::Result<String> {
-//     // Create a minimal SendArgs from the file path and verbose flag.
-//     let send_args = SendArgs {
-//         path: PathBuf::from(file_path),
-//         ticket_type: AddrInfoOptions::RelayAndAddresses,
-//         common: CommonArgs {
-//             magic_ipv4_addr: None,
-//             magic_ipv6_addr: None,
-//             format: Format::Hex,
-//             verbose: if verbose { 1 } else { 0 },
-//             relay: RelayModeOption::Default,
-//         },
-//     };
-
-//     let ticket = match send(send_args).await {
-//         Ok(ticket) => ticket,
-//         Err(e) => return Err(e),
-//     };
-
-//     return Ok(ticket.to_string());
-
-// }
-
-// we are making a function to stop sharing the file
-// pub async fn stop_sharing() -> anyhow::Result<()> {
-//     // let path = PathBuf::from(file_path);
-//     let suffix = rand::thread_rng().gen::<[u8; 16]>();
-//     let cwd = std::env::current_dir()?;
-//     let blobs_data_dir = cwd.join(format!(".sendme-send-{}", HEXLOWER.encode(&suffix)));
-//     if blobs_data_dir.exists() {
-//         println!(
-//             "can not share twice from the same directory: {}",
-//             cwd.display(),
-//         );
-//         std::process::exit(1);
-//     }
-
-//     tokio::fs::remove_dir_all(blobs_data_dir).await?;
-
-//     Ok(())
-// }
-
-
 // In your existing module (or in a new one), add the following:
 pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
@@ -1012,7 +854,6 @@ pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::pro
 
     // Create a unique directory for this sending session.
     let suffix = rand::thread_rng().gen::<[u8; 16]>();
-    let home = dirs::home_dir().unwrap();
     let blobs_data_dir = CWD.join(format!(".sendme-send-{}", HEXLOWER.encode(&suffix)));
     if blobs_data_dir.exists() {
         println!(
@@ -1059,8 +900,8 @@ pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::pro
             println!("    {} {name}", print_hash(hash, args.common.format));
         }
     }
-    println!("to get this data, use");
-    println!("sendme receive {}", ticket);
+    // println!("to get this data, use");
+    // println!("sendme receive {}", ticket);
     drop(temp_tag);
 
     // Instead of waiting for ctrl-c and shutting down,
@@ -1070,7 +911,6 @@ pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::pro
 
 
 use tauri::State;
-use std::sync::Mutex;
 // SharedSenderState SenderState from src/sender_state.rs
 use crate::sender_state::SharedSenderState;
 
@@ -1131,11 +971,11 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
 pub async fn receive_file_minimal(ticket: String, file_storage_path: String, verbose: bool) -> anyhow::Result<String> {
     // ticket
     // print!("{:?}", ticket);
-    println!("Receiving file from ticket: {}", ticket);
+    // println!("Receiving file from ticket: {}", ticket);
 
     let blob = match get_blob(ticket).await {
         Ok(blob) => blob,
-        Err(err) => return Err(anyhow::anyhow!("Failed to get blob: {}", err)),
+        Err(_err) => return Err(anyhow::anyhow!("Failed to get blob")),
     };
     
     // Parse the ticket string into a BlobTicket.

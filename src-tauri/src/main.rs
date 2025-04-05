@@ -9,11 +9,14 @@ mod events; // New module for event types
 
 use sender_state::{SenderState, SharedSenderState};
 use std::sync::Mutex;
-use tauri::{State, Manager, Window};
+use tauri::{State, Window};
 use dirs;
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
+
+use std::env; // Import the env module
+use dotenv::dotenv;
 
 #[tauri::command]
 async fn send_file_command(
@@ -21,9 +24,15 @@ async fn send_file_command(
     verbose: bool,
     state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
-    match sendme::send_file_minimal(file_path, verbose, state).await {
+    match sendme::send_file_minimal(file_path, verbose, state.clone()).await {
         Ok(ticket) => Ok(ticket),
-        Err(e) => Err(e.to_string()),
+        Err(_e) =>{
+            // stop sharing if it fails
+            let _ = sendme::stop_sharing(state).await;
+            // Err(e.to_string())
+            // Emit error event if sending failed
+            Err(format!("Failed to send file"))
+        },
     }
 }
 
@@ -222,6 +231,9 @@ fn main() {
         eprintln!("Application panicked: {:?}", panic_info);
         cleanup_sendme_dirs();
     }));
+
+    //Read the environment variables from a file
+    dotenv().ok(); // Read the .env file
     
     tauri::Builder::default()
         // Manage our shared sender state.
@@ -234,7 +246,7 @@ fn main() {
             get_file_size
         ])
         .on_window_event(|event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+            if let tauri::WindowEvent::CloseRequested {..} = event.event() {
                 cleanup_sendme_dirs();
                 // api.prevent_close();
             }
