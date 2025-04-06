@@ -769,7 +769,7 @@ async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result
     }
     let endpoint = builder.bind().await?;
     let dir_name = format!(".sendme-get-{}", ticket.hash().to_hex());
-    let iroh_data_dir = std::env::current_dir()?.join(dir_name);
+    let iroh_data_dir = CWD.join(dir_name);
     let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
     let mp = MultiProgress::new();
     let connect_progress = mp.add(ProgressBar::hidden());
