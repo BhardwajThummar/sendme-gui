@@ -3,6 +3,7 @@ import { useState } from 'react';
 import './App.css';
 import FileShare from './components/FileShare';
 import FileReceive from './components/FileReceive';
+import { invoke } from '@tauri-apps/api/tauri';
 
 function App() {
   const [activeView, setActiveView] = useState<'home' | 'share' | 'receive'>('home');
@@ -14,7 +15,12 @@ function App() {
         {activeView !== 'home' && (
           <button 
             className="back-button"
-            onClick={() => setActiveView('home')}
+            onClick={async () => {
+              await invoke<string>('stop_sharing_command', {
+                verbose: false 
+              });
+              setActiveView('home')
+            }}
           >
             Back to Home
           </button>
