@@ -18,9 +18,12 @@ use std::time::Instant;
 use std::env; // Import the env module
 use dotenv::dotenv;
 
+// Define a constant for the sendme temporary directory prefix
+const DIR_PREFIX: &str = ".sendme-";
+
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = dirs::home_dir().unwrap();
-    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(".sendme-temp");
+    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(format!("{}temp", DIR_PREFIX));
 }
 
 #[tauri::command]
@@ -204,14 +207,14 @@ fn get_file_size(path: String) -> Result<u64, String> {
     }
 }
 
-/// Deletes all directories in the current directory whose names start with ".sendme-"
+/// Deletes all directories in the current directory whose names start with DIR_PREFIX.
 fn cleanup_sendme_dirs() {
     if let Ok(current_dir) = CWD.canonicalize() {
         match std::fs::read_dir(&current_dir) {
             Ok(entries) => {
                 for entry in entries.flatten() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if name.starts_with(".sendme-") {
+                        if name.starts_with(DIR_PREFIX) {
                             let path = entry.path();
                             if path.is_dir() {
                                 match std::fs::remove_dir_all(&path) {
