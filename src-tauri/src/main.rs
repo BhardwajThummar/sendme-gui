@@ -48,7 +48,7 @@ async fn send_file_command(
 async fn stop_sharing_command(
     state: State<'_, SharedSenderState>,
 ) -> Result<(), String> {
-    match sendme::stop_sharing(state).await {
+    match sendme::stop_sharing(state.clone()).await {
         Ok(()) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
