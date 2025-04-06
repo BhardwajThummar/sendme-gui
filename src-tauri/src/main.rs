@@ -18,6 +18,11 @@ use std::time::Instant;
 use std::env; // Import the env module
 use dotenv::dotenv;
 
+lazy_static::lazy_static! {
+    static ref HOME_DIR: std::path::PathBuf = dirs::home_dir().unwrap();
+    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(".sendme-temp");
+}
+
 #[tauri::command]
 async fn send_file_command(
     file_path: String,
@@ -201,7 +206,7 @@ fn get_file_size(path: String) -> Result<u64, String> {
 
 /// Deletes all directories in the current directory whose names start with ".sendme-"
 fn cleanup_sendme_dirs() {
-    if let Ok(current_dir) = std::env::current_dir() {
+    if let Ok(current_dir) = CWD.canonicalize() {
         match std::fs::read_dir(&current_dir) {
             Ok(entries) => {
                 for entry in entries.flatten() {
