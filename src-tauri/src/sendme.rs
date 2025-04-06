@@ -45,10 +45,12 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+// Define a constant for the sendme temporary directory prefix
+const DIR_PREFIX: &str = ".sendme-";
 
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = dirs::home_dir().unwrap();
-    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(".sendme-temp");
+    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(format!("{}temp", DIR_PREFIX));
 }
 
 /// Send a file or directory between two machines, using blake3 verified streaming.
@@ -768,7 +770,7 @@ async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result
         builder = builder.bind_addr_v6(addr);
     }
     let endpoint = builder.bind().await?;
-    let dir_name = format!(".sendme-get-{}", ticket.hash().to_hex());
+    let dir_name = format!("{}get-{}", DIR_PREFIX, ticket.hash().to_hex());
     let iroh_data_dir = CWD.join(dir_name);
     let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
     let mp = MultiProgress::new();
@@ -854,7 +856,7 @@ pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::pro
 
     // Create a unique directory for this sending session.
     let suffix = rand::thread_rng().gen::<[u8; 16]>();
-    let blobs_data_dir = CWD.join(format!(".sendme-send-{}", HEXLOWER.encode(&suffix)));
+    let blobs_data_dir = CWD.join(format!("{}send-{}", DIR_PREFIX, HEXLOWER.encode(&suffix)));
     if blobs_data_dir.exists() {
         println!(
             "cannot share twice from the same directory: {}",
