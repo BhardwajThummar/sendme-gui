@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
-import { getDownloadsFolderPath } from '../utils/paths';
+import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
 import { listen } from '@tauri-apps/api/event';
 import './FileReceive.css';
 
@@ -31,10 +31,10 @@ const FileReceive: React.FC = () => {
     elapsedTime: string;
     speed: string;
   } | null>(null);
-  
+
   // Create refs for each input field
   const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null));
-  
+
   // Initialize download path and set up event listeners
   useEffect(() => {
     const initPath = async () => {
@@ -46,9 +46,9 @@ const FileReceive: React.FC = () => {
         setDownloadPath('');
       }
     };
-    
+
     initPath();
-    
+
     // Focus first input when component mounts
     setTimeout(() => {
       if (inputRefs.current[0]) {
@@ -59,33 +59,33 @@ const FileReceive: React.FC = () => {
     // Set up event listeners for download events
     const setupListeners = async () => {
       const unlisteners: (() => void)[] = [];
-      
+
       // Listen for download start
       unlisteners.push(
         await listen('download_started', () => {
           console.log('Download started');
           setStatus('processing');
           setStatusMessage('Starting download...');
-          
+
           // Set up a simple progress animation since we can't get actual progress
           let progressValue = 0;
           const interval = setInterval(() => {
             progressValue += 5;
-            
+
             // Cap at 90% (save the last 10% for actual completion)
             if (progressValue > 90) {
               clearInterval(interval);
               return;
             }
-            
+
             setProgress(progressValue);
           }, 500);
-          
+
           // Clear interval on component unmount
           return () => clearInterval(interval);
         })
       );
-      
+
       // Listen for status updates
       unlisteners.push(
         await listen<string>('download_status', (event) => {
@@ -93,20 +93,20 @@ const FileReceive: React.FC = () => {
           setStatusMessage(event.payload);
         })
       );
-      
+
       // Listen for download completion
       unlisteners.push(
         await listen<DownloadCompletedEvent>('download_completed', (event) => {
           console.log('Download completed:', event.payload);
           const { filename, total_bytes, files_count, elapsed_time_ms } = event.payload;
-          
+
           // Update state with completion information
           setFileName(filename);
           setProgress(100);
           setStatus('success');
           setStatusMessage('Download complete!');
           setDownloadComplete(true);
-          
+
           // Format stats for display
           setDownloadStats({
             totalFiles: files_count,
@@ -116,7 +116,7 @@ const FileReceive: React.FC = () => {
           });
         })
       );
-      
+
       // Listen for download errors
       unlisteners.push(
         await listen<string>('download_error', (event) => {
@@ -126,16 +126,16 @@ const FileReceive: React.FC = () => {
           setProgress(0);
         })
       );
-      
+
       // Return cleanup function
       return () => {
         unlisteners.forEach(unlisten => unlisten());
       };
     };
-    
+
     // Set up listeners and store cleanup function
     const cleanupPromise = setupListeners();
-    
+
     // Return cleanup function
     return () => {
       cleanupPromise.then(cleanup => cleanup());
@@ -148,12 +148,12 @@ const FileReceive: React.FC = () => {
     if (!/^[a-zA-Z0-9]*$/.test(value)) {
       return;
     }
-    
+
     // Update the code array
     const newCode = [...code];
     newCode[index] = value.toUpperCase();
     setCode(newCode);
-    
+
     // Auto-focus next input if current one is filled
     if (value && index < 5) {
       if (inputRefs.current[index + 1]) {
@@ -186,12 +186,12 @@ const FileReceive: React.FC = () => {
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData('text').trim();
-    
+
     // If pasted data matches the expected format (6 chars)
     if (/^[a-zA-Z0-9]{6}$/.test(pastedData)) {
       const chars = pastedData.split('').map(char => char.toUpperCase());
       setCode(chars);
-      
+
       // Focus the last input after paste
       if (inputRefs.current[5]) {
         inputRefs.current[5]?.focus();
@@ -204,12 +204,16 @@ const FileReceive: React.FC = () => {
     try {
       const selected = await open({
         directory: true,
-        multiple: true,
+        multiple: false, // Changed to false since we only need one directory
         title: 'Select Download Location',
       });
-      
+
       if (selected && !Array.isArray(selected)) {
+        // Update the UI with the selected path
         setDownloadPath(selected);
+
+        // Save the selected path for future use
+        await saveDownloadPath(selected);
       }
     } catch (error) {
       console.error('Error selecting directory:', error);
@@ -219,31 +223,34 @@ const FileReceive: React.FC = () => {
   // Handle the receive button
   const handleReceive = async () => {
     const fullCode = code.join('');
-    
+
     if (fullCode.length !== 6) {
       setStatus('error');
       setStatusMessage('Please enter a complete 6-character code');
       return;
     }
-    
+
     if (!downloadPath) {
       setStatus('error');
       setStatusMessage('Please select a download location');
       return;
     }
-    
+
     setStatus('processing');
     setStatusMessage('Connecting to sender...');
     setProgress(0);
-    
+
     try {
+      // Save the current download path for future use
+      await saveDownloadPath(downloadPath);
+
       // Invoke the Tauri command to receive file
-      const result = await invoke<string>('receive_file_command', { 
-        ticket: fullCode, 
-        fileStoragePath: downloadPath, 
-        verbose: false 
+      const result = await invoke<string>('receive_file_command', {
+        ticket: fullCode,
+        fileStoragePath: downloadPath,
+        verbose: false
       });
-      
+
       // The results and progress will be handled by the event listeners
       console.log('Command result:', result);
     } catch (error) {
@@ -262,7 +269,7 @@ const FileReceive: React.FC = () => {
     setProgress(0);
     setDownloadComplete(false);
     setDownloadStats(null);
-    
+
     // Focus the first input again
     setTimeout(() => {
       if (inputRefs.current[0]) {
@@ -274,10 +281,10 @@ const FileReceive: React.FC = () => {
   // Helper function to format bytes
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 B';
-    
+
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    
+
     return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
@@ -286,7 +293,7 @@ const FileReceive: React.FC = () => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    
+
     if (hours > 0) {
       return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
     } else if (minutes > 0) {
@@ -299,7 +306,7 @@ const FileReceive: React.FC = () => {
   return (
     <div className="file-receive-container">
       <h2>Receive Files</h2>
-      
+
       {downloadComplete ? (
         <div className="download-complete">
           <div className="download-complete-icon">
@@ -346,7 +353,7 @@ const FileReceive: React.FC = () => {
               ))}
             </div>
           </div>
-          
+
           <div className="download-path-container">
             <label>Save files to</label>
             <div className="download-path-input">
@@ -357,7 +364,7 @@ const FileReceive: React.FC = () => {
                 placeholder="Download location"
                 disabled={status === 'processing'}
               />
-              <button 
+              <button
                 className="browse-button"
                 onClick={handleBrowse}
                 disabled={status === 'processing'}
@@ -366,7 +373,7 @@ const FileReceive: React.FC = () => {
               </button>
             </div>
           </div>
-          
+
           {status === 'processing' && (
             <div className="download-progress">
               <div className="file-info">
@@ -374,16 +381,16 @@ const FileReceive: React.FC = () => {
                 <div className="progress-percentage">{Math.round(progress)}%</div>
               </div>
               <div className="progress-bar-container">
-                <div 
+                <div
                   className="progress-bar"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
             </div>
           )}
-          
+
           <div className="action-buttons">
-            <button 
+            <button
               className="receive-button"
               onClick={handleReceive}
               disabled={code.join('').length !== 6 || !downloadPath || status === 'processing'}
@@ -397,9 +404,9 @@ const FileReceive: React.FC = () => {
                 'Receive Files'
               )}
             </button>
-            
+
             {(status === 'error' || status === 'success') && (
-              <button 
+              <button
                 className="reset-button"
                 onClick={handleReset}
               >
@@ -407,7 +414,7 @@ const FileReceive: React.FC = () => {
               </button>
             )}
           </div>
-          
+
           {statusMessage && (
             <div className={`status-message ${status === 'error' ? 'error' : ''}`}>
               {statusMessage}
