@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use std::env; // Import the env module
 use dotenv::dotenv;
+use tauri_plugin_store;
 
 // Define a constant for the sendme temporary directory prefix
 const DIR_PREFIX: &str = ".sendme-";
@@ -36,7 +37,7 @@ async fn send_file_command(
         Ok(ticket) => Ok(ticket),
         Err(_e) =>{
             // stop sharing if it fails
-            let _ = sendme::stop_sharing(state).await;
+            let e = sendme::stop_sharing(state).await;
             // Err(e.to_string())
             // Emit error event if sending failed
             Err(format!("Failed to send file"))
@@ -63,7 +64,7 @@ async fn receive_file_command(
     verbose: bool,
 ) -> Result<String, String> {
     // Tauri automatically provides the window parameter to the command
-    
+
     // Call our internal implementation that has the window parameter
     receive_file_with_stats(window, ticket, file_storage_path, verbose).await
 }
@@ -77,30 +78,30 @@ async fn receive_file_with_stats(
 ) -> Result<String, String> {
     // Record start time for statistics
     let start_time = Instant::now();
-    
+
     // Emit event that download is starting
     let _ = window.emit("download_started", ());
-    
+
     // Create a window clone for use in the blocking task
     let window_clone = window.clone();
-    
+
     // Run the non-Send future in a blocking task.
     let result = tauri::async_runtime::spawn_blocking(move || {
         // Run the original function inside the blocking task
         futures::executor::block_on(async {
             // First update status
             let _ = window_clone.emit("download_status", "Connecting to sender...");
-            
+
             // Call the original function to do the actual download
             let result = sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
-            
+
             // If download was successful, get file information and emit completion event
             if result.is_ok() {
                 let elapsed_ms = start_time.elapsed().as_millis() as u64;
-                
+
                 // Get information about the downloaded file(s)
                 let file_info = get_downloaded_file_info(&file_storage_path);
-                
+
                 // Emit completion event with statistics
                 let _ = window_clone.emit("download_completed", events::DownloadCompletedEvent {
                     success: true,
@@ -112,7 +113,7 @@ async fn receive_file_with_stats(
                     files_count: file_info.file_count,
                 });
             }
-            
+
             result
         })
     })
@@ -123,7 +124,7 @@ async fn receive_file_with_stats(
         let _ = window.emit("download_error", e.to_string());
         e.to_string()
     });
-    
+
     result
 }
 
@@ -140,7 +141,7 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
     let mut total_size = 0;
     let mut file_count = 0;
     let mut filename = String::from("Downloaded File");
-    
+
     // Check if path exists
     if path_obj.exists() {
         if path_obj.is_file() {
@@ -168,7 +169,7 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
                     }
                     entries_vec.push(entry);
                 }
-                
+
                 // Try to get main directory name or first file name
                 if let Some(name) = path_obj.file_name() {
                     if let Some(name_str) = name.to_str() {
@@ -182,7 +183,7 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
             }
         }
     }
-    
+
     DownloadedFileInfo {
         filename,
         total_size,
@@ -242,14 +243,16 @@ fn main() {
 
     //Read the environment variables from a file
     dotenv().ok(); // Read the .env file
-    
+
     tauri::Builder::default()
         // Manage our shared sender state.
         .manage(Mutex::new(SenderState::default()))
+        // Initialize the store plugin
+        .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
-            send_file_command, 
-            stop_sharing_command, 
-            receive_file_command, 
+            send_file_command,
+            stop_sharing_command,
+            receive_file_command,
             get_downloads_dir,
             get_file_size
         ])
