@@ -632,6 +632,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
         .await?
         .json::<BlobResponse>()
         .await?;
+    println!("Code111111: {}", response.code);
     Ok(response.code)
 }
 
@@ -936,6 +937,8 @@ pub async fn send_file_minimal(
 
     // Call our new start_send() which sets up sharing.
     let (ticket, router, blobs_data_dir) = start_send(send_args).await?;
+
+    print!("Sharing file: {}", ticket);
 
     // Store the router and blobs_data_dir in global state so we can later shut down the sender.
     {

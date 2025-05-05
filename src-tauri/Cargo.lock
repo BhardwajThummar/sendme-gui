@@ -5292,6 +5292,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-store",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -6070,6 +6071,18 @@ dependencies = [
  "syn 1.0.109",
  "tauri-codegen",
  "tauri-utils",
+]
+
+[[package]]
+name = "tauri-plugin-store"
+version = "0.0.0"
+source = "git+https://github.com/tauri-apps/plugins-workspace?branch=v1#2bad1f58f2a6c3e126b2b47ff0d6e6488cf622ae"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
