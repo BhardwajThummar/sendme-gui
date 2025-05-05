@@ -1,6 +1,6 @@
 // src/App.tsx (or another component)
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { getDownloadsFolderPath } from './utils/paths';
 
 const ReceiveFile: React.FC = () => {

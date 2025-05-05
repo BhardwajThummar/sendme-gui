@@ -3,20 +3,20 @@
     windows_subsystem = "windows"
 )]
 
+mod events;
 mod sender_state;
-mod sendme; // Replace with the name of the module that contains your functions
-mod events; // New module for event types
+mod sendme; // Replace with the name of the module that contains your functions // New module for event types
 
-use sender_state::{SenderState, SharedSenderState};
-use std::sync::Mutex;
-use tauri::{State, Window};
 use dirs;
+use sender_state::{SenderState, SharedSenderState};
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
+use tauri::{State, Window, Emitter};
 
-use std::env; // Import the env module
 use dotenv::dotenv;
+use std::env; // Import the env module
 use tauri_plugin_store;
 
 // Define a constant for the sendme temporary directory prefix
@@ -35,20 +35,18 @@ async fn send_file_command(
 ) -> Result<String, String> {
     match sendme::send_file_minimal(file_path, verbose, state.clone()).await {
         Ok(ticket) => Ok(ticket),
-        Err(_e) =>{
+        Err(_e) => {
             // stop sharing if it fails
-            let e = sendme::stop_sharing(state).await;
+            let _e = sendme::stop_sharing(state).await;
             // Err(e.to_string())
             // Emit error event if sending failed
             Err(format!("Failed to send file"))
-        },
+        }
     }
 }
 
 #[tauri::command]
-async fn stop_sharing_command(
-    state: State<'_, SharedSenderState>,
-) -> Result<(), String> {
+async fn stop_sharing_command(state: State<'_, SharedSenderState>) -> Result<(), String> {
     match sendme::stop_sharing(state.clone()).await {
         Ok(()) => Ok(()),
         Err(e) => Err(e.to_string()),
@@ -93,7 +91,8 @@ async fn receive_file_with_stats(
             let _ = window_clone.emit("download_status", "Connecting to sender...");
 
             // Call the original function to do the actual download
-            let result = sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
+            let result =
+                sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
 
             // If download was successful, get file information and emit completion event
             if result.is_ok() {
@@ -103,15 +102,18 @@ async fn receive_file_with_stats(
                 let file_info = get_downloaded_file_info(&file_storage_path);
 
                 // Emit completion event with statistics
-                let _ = window_clone.emit("download_completed", events::DownloadCompletedEvent {
-                    success: true,
-                    message: "Download completed successfully".to_string(),
-                    elapsed_time_ms: elapsed_ms,
-                    download_path: file_storage_path,
-                    filename: file_info.filename,
-                    total_bytes: file_info.total_size,
-                    files_count: file_info.file_count,
-                });
+                let _ = window_clone.emit(
+                    "download_completed",
+                    events::DownloadCompletedEvent {
+                        success: true,
+                        message: "Download completed successfully".to_string(),
+                        elapsed_time_ms: elapsed_ms,
+                        download_path: file_storage_path,
+                        filename: file_info.filename,
+                        total_bytes: file_info.total_size,
+                        files_count: file_info.file_count,
+                    },
+                );
             }
 
             result
@@ -204,7 +206,7 @@ fn get_file_size(path: String) -> Result<u64, String> {
     let path = Path::new(&path);
     match fs::metadata(path) {
         Ok(metadata) => Ok(metadata.len()),
-        Err(e) => Err(format!("Failed to get file size: {}", e))
+        Err(e) => Err(format!("Failed to get file size: {}", e)),
     }
 }
 
@@ -220,7 +222,9 @@ fn cleanup_sendme_dirs() {
                             if path.is_dir() {
                                 match std::fs::remove_dir_all(&path) {
                                     Ok(_) => println!("Removed directory: {}", path.display()),
-                                    Err(e) => eprintln!("Failed to remove {}: {}", path.display(), e),
+                                    Err(e) => {
+                                        eprintln!("Failed to remove {}: {}", path.display(), e)
+                                    }
                                 }
                             }
                         }
@@ -245,6 +249,10 @@ fn main() {
     dotenv().ok(); // Read the .env file
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         // Manage our shared sender state.
         .manage(Mutex::new(SenderState::default()))
         // Initialize the store plugin
@@ -256,8 +264,8 @@ fn main() {
             get_downloads_dir,
             get_file_size
         ])
-        .on_window_event(|event| {
-            if let tauri::WindowEvent::CloseRequested {..} = event.event() {
+        .on_window_event(|_app, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
                 cleanup_sendme_dirs();
                 // api.prevent_close();
             }

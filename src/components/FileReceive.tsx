@@ -1,7 +1,7 @@
 // src/components/FileReceive.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
-import { open } from '@tauri-apps/api/dialog';
+import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
 import { listen } from '@tauri-apps/api/event';
 import './FileReceive.css';

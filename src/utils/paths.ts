@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/tauri';
-import { Store } from 'tauri-plugin-store-api';
+import { invoke } from '@tauri-apps/api/core';
+import { Store } from '@tauri-apps/plugin-store';
 
 // Create a store instance for saving user preferences
 const store = new Store('user-preferences.json');
