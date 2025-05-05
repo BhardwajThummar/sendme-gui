@@ -3,7 +3,7 @@ import { useState } from 'react';
 import './App.css';
 import FileShare from './components/FileShare';
 import FileReceive from './components/FileReceive';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 
 function App() {
   const [activeView, setActiveView] = useState<'home' | 'share' | 'receive'>('home');

@@ -1,5 +1,6 @@
 //! Command line arguments.
 
+use std::env;
 use std::{
     collections::BTreeMap,
     fmt::{Display, Formatter},
@@ -8,15 +9,12 @@ use std::{
     str::FromStr,
     sync::Arc,
     time::Duration,
-};
-use std::env; // Import the env module
+}; // Import the env module
 lazy_static::lazy_static! {
     static ref API_URL: String = env::var("API_URL").unwrap_or_default();
 }
 use anyhow::Context;
-use clap::{
-     Parser, Subcommand,
-};
+use clap::{Parser, Subcommand};
 use console::style;
 use data_encoding::HEXLOWER;
 use futures_buffered::BufferedStreamExt;
@@ -477,7 +475,11 @@ fn get_export_path(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-async fn export(db: impl iroh_blobs::store::Store, collection: Collection, storage_file_path: String) -> anyhow::Result<()> {
+async fn export(
+    db: impl iroh_blobs::store::Store,
+    collection: Collection,
+    storage_file_path: String,
+) -> anyhow::Result<()> {
     // let root = std::env::current_dir()?;
     let root = PathBuf::from(storage_file_path);
     for (name, hash) in collection.iter() {
@@ -602,8 +604,8 @@ fn make_download_progress() -> ProgressBar {
 }
 
 // use serde::{Deserialize, Serialize};
-use std::error::Error;
 use reqwest::Client;
+use std::error::Error;
 
 #[derive(Serialize)]
 struct BlobRequest {
@@ -622,9 +624,7 @@ struct GetBlobResponse {
 
 pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
     let client = Client::new();
-    let payload = BlobRequest {
-        blobs: vec![blob],
-    };
+    let payload = BlobRequest { blobs: vec![blob] };
     let response = client
         .post("https://send.hindalert.com/api/code/")
         .json(&payload)
@@ -839,14 +839,17 @@ async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result
 }
 
 // In your existing module (or in a new one), add the following:
-pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
+pub async fn start_send(
+    args: SendArgs,
+) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
     let mut builder = Endpoint::builder()
         .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
         .secret_key(secret_key)
         .relay_mode(args.common.relay.into());
     if args.ticket_type == AddrInfoOptions::Id {
-        builder = builder.add_discovery(|secret_key| Some(PkarrPublisher::n0_dns(secret_key.clone())));
+        builder =
+            builder.add_discovery(|secret_key| Some(PkarrPublisher::n0_dns(secret_key.clone())));
     }
     if let Some(addr) = args.common.magic_ipv4_addr {
         builder = builder.bind_addr_v4(addr);
@@ -912,7 +915,6 @@ pub async fn start_send(args: SendArgs) -> anyhow::Result<(BlobTicket, iroh::pro
     Ok((ticket, router, blobs_data_dir))
 }
 
-
 use tauri::State;
 // SharedSenderState SenderState from src/sender_state.rs
 use crate::sender_state::SharedSenderState;
@@ -973,7 +975,11 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
     Ok(())
 }
 
-pub async fn receive_file_minimal(ticket: String, file_storage_path: String, verbose: bool) -> anyhow::Result<String> {
+pub async fn receive_file_minimal(
+    ticket: String,
+    file_storage_path: String,
+    verbose: bool,
+) -> anyhow::Result<String> {
     // ticket
     // print!("{:?}", ticket);
     // println!("Receiving file from ticket: {}", ticket);
@@ -982,22 +988,22 @@ pub async fn receive_file_minimal(ticket: String, file_storage_path: String, ver
         Ok(blob) => blob,
         Err(_err) => return Err(anyhow::anyhow!("Failed to get blob")),
     };
-    
+
     // Parse the ticket string into a BlobTicket.
     // let ticket = BlobTicket::from_str(&ticket)?;
     let ticket = BlobTicket::from_str(&blob[0])?;
 
     // Construct a minimal ReceiveArgs using the ticket and verbose flag.
     let receive_args = ReceiveArgs {
-            ticket: ticket,
-            common: CommonArgs {
-                magic_ipv4_addr: None,
-                magic_ipv6_addr: None,
-                format: Format::Hex,
-                verbose: if verbose { 1 } else { 0 },
-                relay: RelayModeOption::Default,
-            },
-        };
+        ticket: ticket,
+        common: CommonArgs {
+            magic_ipv4_addr: None,
+            magic_ipv6_addr: None,
+            format: Format::Hex,
+            verbose: if verbose { 1 } else { 0 },
+            relay: RelayModeOption::Default,
+        },
+    };
 
     let res = receive(receive_args, file_storage_path).await;
 

@@ -18,7 +18,7 @@ pub struct DownloadCompletedEvent {
 //     const KB: u64 = 1024;
 //     const MB: u64 = KB * 1024;
 //     const GB: u64 = MB * 1024;
-    
+
 //     if size < KB {
 //         format!("{} B", size)
 //     } else if size < MB {
@@ -36,7 +36,7 @@ pub struct DownloadCompletedEvent {
 //     let hours = total_seconds / 3600;
 //     let minutes = (total_seconds % 3600) / 60;
 //     let seconds = total_seconds % 60;
-    
+
 //     if hours > 0 {
 //         format!("{}h {}m {}s", hours, minutes, seconds)
 //     } else if minutes > 0 {
