@@ -23,9 +23,7 @@
   "version": "0.1.0",
   "identifier": "com.sendme-gui-tauri-1.app",
   "plugins": {
-    "dialog": {
-      "all": true
-    }
+    "dialog": null
   },
   "app": {
     "security": {
