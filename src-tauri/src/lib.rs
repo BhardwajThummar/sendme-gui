@@ -7,6 +7,7 @@
 mod events;
 mod sender_state;
 mod sendme; // Replace with the name of the module that contains your functions // New module for event types
+mod android_compat; // Compatibility layer for Android
 
 use dirs;
 use sender_state::{SenderState, SharedSenderState};
@@ -34,23 +35,39 @@ async fn send_file_command(
     verbose: bool,
     state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
-    match sendme::send_file_minimal(file_path, verbose, state.clone()).await {
-        Ok(ticket) => Ok(ticket),
-        Err(_e) => {
-            // stop sharing if it fails
-            let _e = sendme::stop_sharing(state).await;
-            // Err(e.to_string())
-            // Emit error event if sending failed
-            Err(format!("Failed to send file"))
+    #[cfg(target_os = "android")]
+    {
+        android_compat::android::send_file_minimal(file_path, verbose)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        match sendme::send_file_minimal(file_path, verbose, state.clone()).await {
+            Ok(ticket) => Ok(ticket),
+            Err(_e) => {
+                // stop sharing if it fails
+                let _e = sendme::stop_sharing(state).await;
+                // Err(e.to_string())
+                // Emit error event if sending failed
+                Err(format!("Failed to send file"))
+            }
         }
     }
 }
 
 #[tauri::command]
 async fn stop_sharing_command(state: State<'_, SharedSenderState>) -> Result<(), String> {
-    match sendme::stop_sharing(state.clone()).await {
-        Ok(()) => Ok(()),
-        Err(e) => Err(e.to_string()),
+    #[cfg(target_os = "android")]
+    {
+        android_compat::android::stop_sharing()
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        match sendme::stop_sharing(state.clone()).await {
+            Ok(()) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
@@ -75,60 +92,101 @@ async fn receive_file_with_stats(
     file_storage_path: String,
     verbose: bool,
 ) -> Result<String, String> {
-    // Record start time for statistics
-    let start_time = Instant::now();
+    #[cfg(target_os = "android")]
+    {
+        // Simplified implementation for Android
+        // Emit event that download is starting
+        let _ = window.emit("download_started", ());
 
-    // Emit event that download is starting
-    let _ = window.emit("download_started", ());
+        // Emit status update
+        let _ = window.emit("download_status", "Connecting to sender...");
 
-    // Create a window clone for use in the blocking task
-    let window_clone = window.clone();
+        // Call the Android-specific implementation
+        let result = android_compat::android::receive_file_minimal(ticket, file_storage_path.clone(), verbose);
 
-    // Run the non-Send future in a blocking task.
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        // Run the original function inside the blocking task
-        futures::executor::block_on(async {
-            // First update status
-            let _ = window_clone.emit("download_status", "Connecting to sender...");
-
-            // Call the original function to do the actual download
-            let result =
-                sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
-
-            // If download was successful, get file information and emit completion event
-            if result.is_ok() {
-                let elapsed_ms = start_time.elapsed().as_millis() as u64;
-
-                // Get information about the downloaded file(s)
-                let file_info = get_downloaded_file_info(&file_storage_path);
-
-                // Emit completion event with statistics
-                let _ = window_clone.emit(
+        // Handle the result
+        match result {
+            Ok(path) => {
+                // Emit completion event with basic statistics
+                let _ = window.emit(
                     "download_completed",
                     events::DownloadCompletedEvent {
                         success: true,
                         message: "Download completed successfully".to_string(),
-                        elapsed_time_ms: elapsed_ms,
+                        elapsed_time_ms: 0,
                         download_path: file_storage_path,
-                        filename: file_info.filename,
-                        total_bytes: file_info.total_size,
-                        files_count: file_info.file_count,
+                        filename: "file".to_string(),
+                        total_bytes: 0,
+                        files_count: 1,
                     },
                 );
+                Ok(path)
             }
+            Err(e) => {
+                // Emit error event if download failed
+                let _ = window.emit("download_error", e.to_string());
+                Err(e)
+            }
+        }
+    }
 
-            result
+    #[cfg(not(target_os = "android"))]
+    {
+        // Record start time for statistics
+        let start_time = Instant::now();
+
+        // Emit event that download is starting
+        let _ = window.emit("download_started", ());
+
+        // Create a window clone for use in the blocking task
+        let window_clone = window.clone();
+
+        // Run the non-Send future in a blocking task.
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            // Run the original function inside the blocking task
+            futures::executor::block_on(async {
+                // First update status
+                let _ = window_clone.emit("download_status", "Connecting to sender...");
+
+                // Call the original function to do the actual download
+                let result =
+                    sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
+
+                // If download was successful, get file information and emit completion event
+                if result.is_ok() {
+                    let elapsed_ms = start_time.elapsed().as_millis() as u64;
+
+                    // Get information about the downloaded file(s)
+                    let file_info = get_downloaded_file_info(&file_storage_path);
+
+                    // Emit completion event with statistics
+                    let _ = window_clone.emit(
+                        "download_completed",
+                        events::DownloadCompletedEvent {
+                            success: true,
+                            message: "Download completed successfully".to_string(),
+                            elapsed_time_ms: elapsed_ms,
+                            download_path: file_storage_path,
+                            filename: file_info.filename,
+                            total_bytes: file_info.total_size,
+                            files_count: file_info.file_count,
+                        },
+                    );
+                }
+
+                result
+            })
         })
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| {
-        // Emit error event if download failed
-        let _ = window.emit("download_error", e.to_string());
-        e.to_string()
-    });
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| {
+            // Emit error event if download failed
+            let _ = window.emit("download_error", e.to_string());
+            e.to_string()
+        });
 
-    result
+        result
+    }
 }
 
 // Helper struct for file information
