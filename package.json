@@ -8,7 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "postbuild": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh"
+    "postbuild": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build",
+    "android:run": "tauri android run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

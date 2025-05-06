@@ -22,7 +22,11 @@
   "mainBinaryName": "sendme-gui-tauri-1",
   "version": "0.1.0",
   "identifier": "com.sendme-gui-tauri-1.app",
-  "plugins": {},
+  "plugins": {
+    "dialog": {
+      "all": true
+    }
+  },
   "app": {
     "security": {
       "csp": null
