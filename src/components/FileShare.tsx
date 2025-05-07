@@ -3,9 +3,7 @@ import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { useToast } from '@/components/ui/toast';
 import { Upload, File, X, Copy, FolderOpen, Plus, CheckCircle, Loader2 } from 'lucide-react';
 
 interface FileInfo {
@@ -209,7 +207,6 @@ const FileShare: React.FC = () => {
     setShareCode('');
   };
 
-  const { addToast } = useToast();
 
   return (
     <div className="w-full">

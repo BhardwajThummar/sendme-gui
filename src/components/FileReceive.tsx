@@ -372,8 +372,8 @@ const FileReceive: React.FC = () => {
       ) : (
         <div className="space-y-4">
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-center">Enter 6-digit Code</h3>
-            <div className="flex justify-center gap-1">
+            <h3 className="text-base font-medium text-center">Enter 6-digit Code</h3>
+            <div className="flex justify-center gap-2">
               {code.map((char, index) => (
                 <Input
                   key={index}
@@ -384,7 +384,7 @@ const FileReceive: React.FC = () => {
                   onChange={(e) => handleCodeChange(index, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(index, e)}
                   onPaste={index === 0 ? handlePaste : undefined}
-                  className="w-9 h-11 text-center text-lg font-mono border-border focus:border-primary focus:ring-primary/30 p-0"
+                  className="w-12 h-14 text-center text-xl font-mono border-border focus:border-primary focus:ring-primary/30 p-0"
                   disabled={status === 'processing'}
                 />
               ))}
@@ -422,7 +422,7 @@ const FileReceive: React.FC = () => {
               className="w-full flex items-center gap-2"
               onClick={handleReceive}
               disabled={code.join('').length !== 6 || !downloadPath || status === 'processing'}
-              variant="secondary"
+              variant="default"
             >
               {status === 'processing' ? (
                 <>
