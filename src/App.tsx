@@ -22,9 +22,9 @@ function App() {
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-        {/* Mobile-like container with fixed width */}
-        <div className="w-full max-w-[360px] h-[640px] flex flex-col bg-background border border-border rounded-xl shadow-lg overflow-hidden">
+      <div className="min-h-screen bg-background flex flex-col">
+        {/* Full-screen container with footer at bottom */}
+        <div className="w-full flex flex-col flex-grow bg-background overflow-hidden">
           <header className="flex items-center justify-center py-3 border-b">
             <h1 className="text-lg font-bold text-foreground">Secure File Transfer</h1>
           </header>
@@ -33,7 +33,7 @@ function App() {
             defaultValue="share"
             value={activeTab}
             onValueChange={handleTabChange}
-            className="flex flex-col flex-1"
+            className="flex flex-col flex-grow"
           >
             <div className="border-b px-4 py-2">
               <TabsList className="w-full h-12 bg-muted rounded-lg p-1 gap-2">
@@ -58,18 +58,18 @@ function App() {
               </TabsList>
             </div>
 
-            <main className="flex-1 overflow-auto">
-              <TabsContent value="share" className="flex-1 p-4 m-0 h-full overflow-auto data-[state=active]:block">
+            <main className="flex-grow overflow-auto">
+              <TabsContent value="share" className="h-full p-4 m-0 overflow-auto data-[state=active]:block">
                 <FileShare />
               </TabsContent>
 
-              <TabsContent value="receive" className="flex-1 p-4 m-0 h-full overflow-auto data-[state=active]:block">
+              <TabsContent value="receive" className="h-full p-4 m-0 overflow-auto data-[state=active]:block">
                 <FileReceive />
               </TabsContent>
             </main>
           </Tabs>
 
-          <footer className="text-center text-xs text-muted-foreground py-3 border-t">
+          <footer className="mt-auto text-center text-xs text-muted-foreground py-3 border-t">
             <p>Secure File Transfer • Share files safely</p>
           </footer>
         </div>

@@ -31,9 +31,17 @@
     },
     "windows": [
       {
-        "title": "sendme-gui-tauri-1",
-        "width": 800,
-        "height": 600,
+        "title": "Secure File Transfer",
+        "width": 400,
+        "height": 700,
+        "minWidth": 380,
+        "minHeight": 640,
+        "maxWidth": 420,
+        "maxHeight": 800,
+        "resizable": true,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
         "useHttpsScheme": true
       }
     ]
