@@ -5,11 +5,25 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { Download, FolderOpen, CheckCircle, RefreshCw, Loader2, FileDown, X } from 'lucide-react';
+import {
+  Download,
+  FolderOpen,
+  CheckCircle,
+  RefreshCw,
+  Loader2,
+  FileDown,
+  X,
+} from 'lucide-react';
 
 // Define types for download events
 interface DownloadCompletedEvent {
@@ -25,7 +39,9 @@ interface DownloadCompletedEvent {
 const FileReceive: React.FC = () => {
   const [code, setCode] = useState<string[]>(Array(6).fill(''));
   const [downloadPath, setDownloadPath] = useState<string>('');
-  const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<
+    'idle' | 'processing' | 'success' | 'error'
+  >('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
   const [fileName, setFileName] = useState<string>('');
@@ -44,8 +60,16 @@ const FileReceive: React.FC = () => {
   useEffect(() => {
     const initPath = async () => {
       try {
+        // Get the downloads folder path (which now defaults to the Downloads folder)
         const path = await getDownloadsFolderPath();
-        setDownloadPath(path);
+
+        if (path) {
+          setDownloadPath(path);
+        } else {
+          // If for some reason we couldn't get the downloads folder, try to get it directly
+          const downloadsDir = await invoke<string>('get_downloads_dir');
+          setDownloadPath(downloadsDir || '');
+        }
       } catch (error) {
         console.error('Error getting downloads folder:', error);
         setDownloadPath('');
@@ -103,7 +127,8 @@ const FileReceive: React.FC = () => {
       unlisteners.push(
         await listen<DownloadCompletedEvent>('download_completed', (event) => {
           console.log('Download completed:', event.payload);
-          const { filename, total_bytes, files_count, elapsed_time_ms } = event.payload;
+          const { filename, total_bytes, files_count, elapsed_time_ms } =
+            event.payload;
 
           // Update state with completion information
           setFileName(filename);
@@ -117,7 +142,9 @@ const FileReceive: React.FC = () => {
             totalFiles: files_count,
             totalSize: formatBytes(total_bytes),
             elapsedTime: formatTime(elapsed_time_ms),
-            speed: formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) + '/s'
+            speed:
+              formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) +
+              '/s',
           });
         })
       );
@@ -134,7 +161,7 @@ const FileReceive: React.FC = () => {
 
       // Return cleanup function
       return () => {
-        unlisteners.forEach(unlisten => unlisten());
+        unlisteners.forEach((unlisten) => unlisten());
       };
     };
 
@@ -143,7 +170,7 @@ const FileReceive: React.FC = () => {
 
     // Return cleanup function
     return () => {
-      cleanupPromise.then(cleanup => cleanup());
+      cleanupPromise.then((cleanup) => cleanup());
     };
   }, []);
 
@@ -194,7 +221,7 @@ const FileReceive: React.FC = () => {
 
     // If pasted data matches the expected format (6 chars)
     if (/^[a-zA-Z0-9]{6}$/.test(pastedData)) {
-      const chars = pastedData.split('').map(char => char.toUpperCase());
+      const chars = pastedData.split('').map((char) => char.toUpperCase());
       setCode(chars);
 
       // Focus the last input after paste
@@ -253,7 +280,7 @@ const FileReceive: React.FC = () => {
       const result = await invoke<string>('receive_file_command', {
         ticket: fullCode,
         fileStoragePath: downloadPath,
-        verbose: false
+        verbose: false,
       });
 
       // The results and progress will be handled by the event listeners
@@ -318,14 +345,18 @@ const FileReceive: React.FC = () => {
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
               <CheckCircle className="h-8 w-8 text-primary" />
             </div>
-            <h2 className="text-xl font-bold text-center">Download Complete!</h2>
+            <h2 className="text-xl font-bold text-center">
+              Download Complete!
+            </h2>
 
             {downloadStats && (
               <div className="bg-muted p-4 rounded-lg text-xs space-y-3 border border-border w-full mt-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-border">
                   <FileDown className="h-4 w-4 text-foreground shrink-0" />
                   <div className="min-w-0">
-                    <div className="font-medium text-sm truncate">{fileName}</div>
+                    <div className="font-medium text-sm truncate">
+                      {fileName}
+                    </div>
                     {downloadStats.totalFiles > 1 && (
                       <div className="text-xs text-muted-foreground">
                         {downloadStats.totalFiles} files
@@ -340,11 +371,17 @@ const FileReceive: React.FC = () => {
                     <div className="font-medium">{downloadStats.totalSize}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground mb-1">Download Time</div>
-                    <div className="font-medium">{downloadStats.elapsedTime}</div>
+                    <div className="text-muted-foreground mb-1">
+                      Download Time
+                    </div>
+                    <div className="font-medium">
+                      {downloadStats.elapsedTime}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground mb-1">Average Speed</div>
+                    <div className="text-muted-foreground mb-1">
+                      Average Speed
+                    </div>
                     <div className="font-medium">{downloadStats.speed}</div>
                   </div>
                 </div>
@@ -352,7 +389,9 @@ const FileReceive: React.FC = () => {
             )}
 
             <div className="space-y-1 w-full px-2 mt-2">
-              <p className="text-xs text-muted-foreground">Your file has been saved to:</p>
+              <p className="text-xs text-muted-foreground">
+                Your file has been saved to:
+              </p>
               <div className="bg-muted p-2 rounded-md text-xs font-mono break-all border border-border">
                 {downloadPath}
               </div>
@@ -372,12 +411,14 @@ const FileReceive: React.FC = () => {
       ) : (
         <div className="space-y-4">
           <div className="space-y-3">
-            <h3 className="text-base font-medium text-center">Enter 6-digit Code</h3>
+            <h3 className="text-base font-medium text-center">
+              Enter 6-character Code
+            </h3>
             <div className="flex justify-center gap-2">
               {code.map((char, index) => (
                 <Input
                   key={index}
-                  ref={(el) => inputRefs.current[index] = el}
+                  ref={(el) => (inputRefs.current[index] = el)}
                   type="text"
                   maxLength={1}
                   value={char}
@@ -421,7 +462,11 @@ const FileReceive: React.FC = () => {
             <Button
               className="w-full flex items-center gap-2"
               onClick={handleReceive}
-              disabled={code.join('').length !== 6 || !downloadPath || status === 'processing'}
+              disabled={
+                code.join('').length !== 6 ||
+                !downloadPath ||
+                status === 'processing'
+              }
               variant="default"
             >
               {status === 'processing' ? (
@@ -453,11 +498,15 @@ const FileReceive: React.FC = () => {
           {status === 'processing' && (
             <div className="space-y-2 mt-4 border border-border rounded-lg p-3 bg-muted">
               <div className="flex justify-between items-center text-xs">
-                <span className="font-medium truncate max-w-[70%]">{fileName || 'Downloading file...'}</span>
+                <span className="font-medium truncate max-w-[70%]">
+                  {fileName || 'Downloading file...'}
+                </span>
                 <span className="font-medium">{Math.round(progress)}%</span>
               </div>
               <Progress value={progress} className="h-2" />
-              <p className="text-xs text-center text-muted-foreground">{statusMessage || 'Please wait...'}</p>
+              <p className="text-xs text-center text-muted-foreground">
+                {statusMessage || 'Please wait...'}
+              </p>
             </div>
           )}
 

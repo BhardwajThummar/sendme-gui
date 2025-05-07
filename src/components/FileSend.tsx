@@ -1,4 +1,4 @@
-// src/components/FileShare.tsx
+// src/components/FileSend.tsx
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -21,13 +21,13 @@ interface FileInfo {
   path: string;
 }
 
-const FileShare: React.FC = () => {
+const FileSend: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
   const [status, setStatus] = useState<
     'idle' | 'processing' | 'success' | 'error'
   >('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
-  const [shareCode, setShareCode] = useState<string>('');
+  const [sendCode, setSendCode] = useState<string>('');
 
   // Format file size for display
   const formatFileSize = (bytes: number): string => {
@@ -45,7 +45,7 @@ const FileShare: React.FC = () => {
       const selected = await open({
         multiple: true,
         // directory: true,
-        title: 'Select Files to Share',
+        title: 'Select Files to Send',
       });
 
       console.log('Files selected:', selected);
@@ -106,6 +106,7 @@ const FileShare: React.FC = () => {
       setStatusMessage(`Error selecting files: ${error}`);
     }
   };
+  
   // Handle directory selection using Tauri's dialog API
   const handleDirSelect = async () => {
     try {
@@ -113,7 +114,7 @@ const FileShare: React.FC = () => {
       const selected = await open({
         multiple: true,
         directory: true,
-        title: 'Select Directories to Share',
+        title: 'Select Directories to Send',
       });
 
       console.log('Directories selected:', selected);
@@ -179,12 +180,12 @@ const FileShare: React.FC = () => {
   const removeFile = (index: number) => {
     setSelectedFiles((files) => files.filter((_, i) => i !== index));
     if (selectedFiles.length <= 1) {
-      setShareCode('');
+      setSendCode('');
     }
   };
 
-  // Handle the share button click
-  const handleShare = async () => {
+  // Handle the send button click
+  const handleSend = async () => {
     if (selectedFiles.length === 0) {
       setStatus('error');
       setStatusMessage('Please select at least one file');
@@ -204,50 +205,50 @@ const FileShare: React.FC = () => {
         verbose: false,
       });
 
-      // Set the share code received from backend
-      setShareCode(result);
+      // Set the send code received from backend
+      setSendCode(result);
       setStatus('success');
-      setStatusMessage('Your files are ready to share!');
+      setStatusMessage('Your files are ready to send!');
     } catch (error) {
-      console.error('Error sharing files:', error);
+      console.error('Error sending files:', error);
       setStatus('error');
       setStatusMessage(`Error: ${error}`);
     }
   };
 
-  // Copy share code to clipboard
+  // Copy send code to clipboard
   const copyCodeToClipboard = () => {
-    navigator.clipboard.writeText(shareCode);
+    navigator.clipboard.writeText(sendCode);
     setStatusMessage('Code copied to clipboard!');
 
     // Reset the message after 2 seconds
     setTimeout(() => {
       if (status === 'success') {
-        setStatusMessage('Your files are ready to share!');
+        setStatusMessage('Your files are ready to send!');
       }
     }, 2000);
   };
 
-  // Reset the share process
+  // Reset the send process
   const handleReset = () => {
     setSelectedFiles([]);
     setStatus('idle');
     setStatusMessage('');
-    setShareCode('');
+    setSendCode('');
   };
 
   return (
     <div className="w-full">
-      {shareCode ? (
+      {sendCode ? (
         <div className="space-y-6">
           <div className="flex flex-col items-center justify-center">
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
               <CheckCircle className="h-8 w-8 text-primary" />
             </div>
-            <h2 className="text-xl font-bold text-center">Your Share Code</h2>
+            <h2 className="text-xl font-bold text-center">Your Send Code</h2>
 
             <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
-              {shareCode.split('').map((char, index) => (
+              {sendCode.split('').map((char, index) => (
                 <span
                   key={index}
                   className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
@@ -258,7 +259,7 @@ const FileShare: React.FC = () => {
             </div>
 
             <p className="text-muted-foreground text-sm text-center px-4">
-              Share this code with the recipient to let them download your files
+              Send this code to the recipient to let them download your files
             </p>
           </div>
 
@@ -272,7 +273,7 @@ const FileShare: React.FC = () => {
             </Button>
 
             <Button variant="outline" onClick={handleReset} className="w-full">
-              Share Different Files
+              Send Different Files
             </Button>
           </div>
         </div>
@@ -366,7 +367,7 @@ const FileShare: React.FC = () => {
 
                 <Button
                   className="flex items-center gap-2 w-full"
-                  onClick={handleShare}
+                  onClick={handleSend}
                   disabled={
                     status === 'processing' || selectedFiles.length === 0
                   }
@@ -377,7 +378,7 @@ const FileShare: React.FC = () => {
                       <span>Preparing...</span>
                     </>
                   ) : (
-                    'Generate Share Code'
+                    'Generate Send Code'
                   )}
                 </Button>
               </div>
@@ -413,4 +414,4 @@ const FileShare: React.FC = () => {
   );
 };
 
-export default FileShare;
+export default FileSend;
