@@ -4,7 +4,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
 import { listen } from '@tauri-apps/api/event';
-import './FileReceive.css';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { Download, FolderOpen, CheckCircle, RefreshCw, Loader2, FileDown, X } from 'lucide-react';
 
 // Define types for download events
 interface DownloadCompletedEvent {
@@ -303,124 +308,192 @@ const FileReceive: React.FC = () => {
     }
   };
 
+  const { addToast } = useToast();
+
   return (
-    <div className="file-receive-container">
-      <h2>Receive Files</h2>
-
+    <div className="w-full max-w-md mx-auto">
       {downloadComplete ? (
-        <div className="download-complete">
-          <div className="download-complete-icon">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-          </div>
-          <h3>Download Complete!</h3>
-          {downloadStats && (
-            <div className="download-stats">
-              <p>
-                Downloaded: <strong>{fileName}</strong>
-                {downloadStats.totalFiles > 1 && ` (${downloadStats.totalFiles} files)`}
-              </p>
-              <p>Total Size: <strong>{downloadStats.totalSize}</strong></p>
-              <p>Time: <strong>{downloadStats.elapsedTime}</strong> • Average Speed: <strong>{downloadStats.speed}</strong></p>
+        <Card className="border-secondary/20">
+          <CardHeader className="text-center pb-2 space-y-2 pt-6">
+            <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle className="h-7 w-7 sm:h-8 sm:w-8 text-green-600" />
             </div>
-          )}
-          <p>Your file has been saved to:</p>
-          <div className="download-path">{downloadPath}</div>
-          <button className="receive-again-button" onClick={handleReset}>
-            Receive Another File
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="code-input-container">
-            <label>Enter your 6-character receive code</label>
-            <div className="code-inputs">
-              {code.map((char, index) => (
-                <input
-                  key={index}
-                  ref={(el) => inputRefs.current[index] = el}
-                  type="text"
-                  maxLength={1}
-                  value={char}
-                  onChange={(e) => handleCodeChange(index, e.target.value)}
-                  onKeyDown={(e) => handleKeyDown(index, e)}
-                  onPaste={index === 0 ? handlePaste : undefined}
-                  className="code-input"
-                  disabled={status === 'processing'}
-                />
-              ))}
-            </div>
-          </div>
+            <CardTitle className="text-xl sm:text-2xl">Download Complete!</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 px-4">
+            {downloadStats && (
+              <div className="bg-muted/50 p-4 rounded-lg text-sm space-y-3 border border-secondary/20">
+                <div className="flex items-center gap-2 pb-2 border-b">
+                  <FileDown className="h-4 w-4 text-secondary shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate">{fileName}</div>
+                    {downloadStats.totalFiles > 1 && (
+                      <div className="text-xs text-muted-foreground">
+                        {downloadStats.totalFiles} files
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-          <div className="download-path-container">
-            <label>Save files to</label>
-            <div className="download-path-input">
-              <input
-                type="text"
-                value={downloadPath}
-                onChange={(e) => setDownloadPath(e.target.value)}
-                placeholder="Download location"
-                disabled={status === 'processing'}
-              />
-              <button
-                className="browse-button"
-                onClick={handleBrowse}
-                disabled={status === 'processing'}
-              >
-                Browse
-              </button>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-muted-foreground mb-1">Total Size</div>
+                    <div className="font-medium">{downloadStats.totalSize}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground mb-1">Download Time</div>
+                    <div className="font-medium">{downloadStats.elapsedTime}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground mb-1">Average Speed</div>
+                    <div className="font-medium">{downloadStats.speed}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Your file has been saved to:</p>
+              <div className="bg-muted/50 p-2 rounded-md text-xs font-mono break-all border border-secondary/20">
+                {downloadPath}
+              </div>
             </div>
-          </div>
+          </CardContent>
+          <CardFooter className="justify-center pb-6">
+            <Button
+              onClick={handleReset}
+              className="flex items-center gap-2 w-full"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Receive Another File
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          <Card className="border-secondary/20">
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-lg sm:text-xl text-center">Enter Receive Code</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 px-4">
+              <div className="space-y-2">
+                <label className="text-xs sm:text-sm font-medium block text-center">
+                  Enter the 6-character code from sender
+                </label>
+                <div className="flex justify-center gap-1 sm:gap-2">
+                  {code.map((char, index) => (
+                    <Input
+                      key={index}
+                      ref={(el) => inputRefs.current[index] = el}
+                      type="text"
+                      maxLength={1}
+                      value={char}
+                      onChange={(e) => handleCodeChange(index, e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(index, e)}
+                      onPaste={index === 0 ? handlePaste : undefined}
+                      className="w-10 h-12 sm:w-12 sm:h-14 text-center text-lg sm:text-xl font-mono border-secondary/20 focus:border-secondary focus:ring-secondary/30 p-0"
+                      disabled={status === 'processing'}
+                    />
+                  ))}
+                </div>
+                <p className="text-xs text-center text-muted-foreground">
+                  Code is case-insensitive and can be pasted
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs sm:text-sm font-medium block">Save files to</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={downloadPath}
+                    onChange={(e) => setDownloadPath(e.target.value)}
+                    placeholder="Download location"
+                    disabled={status === 'processing'}
+                    className="flex-1 border-secondary/20 text-xs sm:text-sm"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={handleBrowse}
+                    disabled={status === 'processing'}
+                    className="flex items-center border-secondary/20 hover:bg-secondary/5 hover:text-secondary px-2 sm:px-3"
+                    size="sm"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex flex-col gap-3 pb-5">
+              <Button
+                className="w-full flex items-center gap-2"
+                onClick={handleReceive}
+                disabled={code.join('').length !== 6 || !downloadPath || status === 'processing'}
+                variant="secondary"
+              >
+                {status === 'processing' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Receiving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    <span>Receive Files</span>
+                  </>
+                )}
+              </Button>
+
+              {(status === 'error' || status === 'success') && (
+                <Button
+                  variant="outline"
+                  onClick={handleReset}
+                  className="flex items-center gap-2 w-full"
+                  size="sm"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Reset
+                </Button>
+              )}
+            </CardFooter>
+          </Card>
 
           {status === 'processing' && (
-            <div className="download-progress">
-              <div className="file-info">
-                <div className="file-name">{fileName || 'Downloading file...'}</div>
-                <div className="progress-percentage">{Math.round(progress)}%</div>
-              </div>
-              <div className="progress-bar-container">
-                <div
-                  className="progress-bar"
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-            </div>
+            <Card className="border-secondary/20">
+              <CardContent className="py-4 px-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-xs sm:text-sm">
+                    <span className="font-medium truncate max-w-[70%]">{fileName || 'Downloading file...'}</span>
+                    <span className="font-medium">{Math.round(progress)}%</span>
+                  </div>
+                  <Progress value={progress} className="h-2" />
+                  <p className="text-xs text-center text-muted-foreground">{statusMessage || 'Please wait...'}</p>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
-          <div className="action-buttons">
-            <button
-              className="receive-button"
-              onClick={handleReceive}
-              disabled={code.join('').length !== 6 || !downloadPath || status === 'processing'}
-            >
-              {status === 'processing' ? (
-                <>
-                  <div className="spinner"></div>
-                  Receiving...
-                </>
-              ) : (
-                'Receive Files'
-              )}
-            </button>
-
-            {(status === 'error' || status === 'success') && (
-              <button
-                className="reset-button"
-                onClick={handleReset}
-              >
-                Reset
-              </button>
-            )}
-          </div>
-
-          {statusMessage && (
-            <div className={`status-message ${status === 'error' ? 'error' : ''}`}>
-              {statusMessage}
-            </div>
+          {status === 'error' && statusMessage && (
+            <Card className="border-destructive/20 bg-destructive/5">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-2 text-destructive">
+                  <X className="h-4 w-4 shrink-0" />
+                  <p className="text-xs sm:text-sm">{statusMessage}</p>
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </>
+
+          {status !== 'error' && status !== 'processing' && statusMessage && (
+            <Card className="border-secondary/20 bg-secondary/5">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-2 text-secondary">
+                  <p className="text-xs sm:text-sm">{statusMessage}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );

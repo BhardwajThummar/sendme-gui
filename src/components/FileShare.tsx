@@ -2,7 +2,11 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import './FileShare.css';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { useToast } from '@/components/ui/toast';
+import { Upload, File, X, Copy, FolderOpen, Plus, CheckCircle, Loader2 } from 'lucide-react';
 
 interface FileInfo {
   name: string;
@@ -34,19 +38,19 @@ const FileShare: React.FC = () => {
         // directory: true,
         title: 'Select Files to Share'
       });
-      
+
       console.log("Files selected:", selected);
-      
+
       if (selected && Array.isArray(selected) && selected.length > 0) {
         setStatus('processing');
         setStatusMessage('Getting file information...');
-        
+
         // Get actual file sizes using backend command
         const filePromises = selected.map(async (path) => {
           // Extract filename from path
           const pathParts = path.split(/[/\\]/);
           const fileName = pathParts[pathParts.length - 1];
-          
+
           try {
             // Get actual file size from Tauri backend
             const size = await invoke<number>('get_file_size', { path });
@@ -64,7 +68,7 @@ const FileShare: React.FC = () => {
             };
           }
         });
-        
+
         try {
           // Wait for all file size promises to resolve
           const newFiles = await Promise.all(filePromises);
@@ -93,19 +97,19 @@ const FileShare: React.FC = () => {
         directory: true,
         title: 'Select Directories to Share'
       });
-      
+
       console.log("Directories selected:", selected);
-      
+
       if (selected && Array.isArray(selected) && selected.length > 0) {
         setStatus('processing');
         setStatusMessage('Getting file information...');
-        
+
         // Get actual file sizes using backend command
         const filePromises = selected.map(async (path) => {
           // Extract filename from path
           const pathParts = path.split(/[/\\]/);
           const fileName = pathParts[pathParts.length - 1];
-          
+
           try {
             // Get actual file size from Tauri backend
             const size = await invoke<number>('get_file_size', { path });
@@ -123,7 +127,7 @@ const FileShare: React.FC = () => {
             };
           }
         });
-        
+
         try {
           // Wait for all file size promises to resolve
           const newFiles = await Promise.all(filePromises);
@@ -162,17 +166,17 @@ const FileShare: React.FC = () => {
 
     setStatus('processing');
     setStatusMessage('Preparing your files...');
-    
+
     try {
       // Use the first selected file path since the backend expects a single filePath
       const filePath = selectedFiles[0].path;
-      
+
       // Call the Tauri command with the correct parameter name
-      const result = await invoke<string>('send_file_command', { 
-        filePath: filePath, 
-        verbose: false 
+      const result = await invoke<string>('send_file_command', {
+        filePath: filePath,
+        verbose: false
       });
-      
+
       // Set the share code received from backend
       setShareCode(result);
       setStatus('success');
@@ -188,7 +192,7 @@ const FileShare: React.FC = () => {
   const copyCodeToClipboard = () => {
     navigator.clipboard.writeText(shareCode);
     setStatusMessage('Code copied to clipboard!');
-    
+
     // Reset the message after 2 seconds
     setTimeout(() => {
       if (status === 'success') {
@@ -205,152 +209,194 @@ const FileShare: React.FC = () => {
     setShareCode('');
   };
 
+  const { addToast } = useToast();
+
   return (
-    <div className="file-share-container">
-      <h2>Share Files</h2>
-      
+    <div className="w-full max-w-md mx-auto">
       {shareCode ? (
-        <div className="share-code-container">
-          <div className="share-code-header">
-            <h3>Your Share Code</h3>
-            <div className="pulse-animation"></div>
-          </div>
-          <div className="share-code">
-            {shareCode.split('').map((char, index) => (
-              <span key={index} className="share-code-char">{char}</span>
-            ))}
-          </div>
-          <p className="share-code-instructions">
-            Share this code with the recipient to let them download your files
-          </p>
-          <button className="copy-code-button" onClick={copyCodeToClipboard}>
-            Copy Code
-          </button>
-          <button className="reset-button" onClick={handleReset}>
-            Share Different Files
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="file-selection-area">
-            <div className="file-browse-container">
-              <button 
-                className="file-browse-button"
-                onClick={handleFileSelect}
-                disabled={status === 'processing'}
-              >
-                {status === 'processing' ? (
-                  <>
-                    <div className="spinner"></div>
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="17 8 12 3 7 8"></polyline>
-                      <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    Select Files to Share
-                  </>
-                )}
-              </button>
-              <button 
-                className="file-browse-button"
-                onClick={handleDirSelect}
-                disabled={status === 'processing'}
-              >
-                {status === 'processing' ? (
-                  <>
-                    <div className="spinner"></div>
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="17 8 12 3 7 8"></polyline>
-                      <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    Select Directories to Share
-                  </>
-                )}
-              </button>
-              <p className="file-browse-hint">
-                Use the button above to select files from your computer
-              </p>
+        <Card className="border-primary/20">
+          <CardHeader className="text-center pb-2 space-y-2 pt-6">
+            <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <CheckCircle className="h-7 w-7 sm:h-8 sm:w-8 text-primary" />
+            </div>
+            <CardTitle className="text-xl sm:text-2xl">Your Share Code</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center px-4">
+            <div className="flex flex-wrap justify-center items-center gap-2 text-2xl sm:text-3xl font-mono bg-muted/50 p-4 rounded-lg my-2 border border-primary/20">
+              {shareCode.split('').map((char, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center justify-center w-10 h-12 sm:w-12 sm:h-14 rounded-md bg-background border border-primary/20 shadow-sm"
+                >
+                  {char}
+                </span>
+              ))}
             </div>
 
-            {selectedFiles.length > 0 && (
-              <div className="selected-files-container">
-                <h3>Selected Files</h3>
-                <ul className="file-list">
+            <p className="text-muted-foreground text-sm">
+              Share this code with the recipient to let them download your files
+            </p>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3 justify-center pb-6">
+            <Button
+              onClick={copyCodeToClipboard}
+              className="flex items-center justify-center gap-2 w-full"
+            >
+              <Copy className="h-4 w-4" />
+              Copy Code
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={handleReset}
+              className="w-full"
+            >
+              Share Different Files
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          <Card className="border-primary/20">
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-lg sm:text-xl text-center">Select Files to Share</CardTitle>
+            </CardHeader>
+            <CardContent className="px-4">
+              <div className="grid grid-cols-1 gap-3">
+                <Button
+                  variant="outline"
+                  className="h-auto py-5 flex flex-col items-center gap-3 border-primary/20 hover:border-primary/50 hover:bg-primary/5"
+                  onClick={handleFileSelect}
+                  disabled={status === 'processing'}
+                >
+                  {status === 'processing' ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <span>Processing...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="h-8 w-8 text-primary" />
+                      <div className="text-center">
+                        <div className="font-medium text-sm sm:text-base">Select Files</div>
+                        <div className="text-xs text-muted-foreground">Choose individual files to share</div>
+                      </div>
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="h-auto py-5 flex flex-col items-center gap-3 border-primary/20 hover:border-primary/50 hover:bg-primary/5"
+                  onClick={handleDirSelect}
+                  disabled={status === 'processing'}
+                >
+                  {status === 'processing' ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <span>Processing...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <FolderOpen className="h-8 w-8 text-primary" />
+                      <div className="text-center">
+                        <div className="font-medium text-sm sm:text-base">Select Folders</div>
+                        <div className="text-xs text-muted-foreground">Choose entire folders to share</div>
+                      </div>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedFiles.length > 0 && (
+            <Card className="border-primary/20">
+              <CardHeader className="pb-2 pt-5">
+                <CardTitle className="text-lg sm:text-xl">Selected Files ({selectedFiles.length})</CardTitle>
+              </CardHeader>
+              <CardContent className="px-4">
+                <div className="border rounded-lg divide-y max-h-[250px] overflow-y-auto">
                   {selectedFiles.map((file, index) => (
-                    <li key={index} className="file-item">
-                      <div className="file-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                          <polyline points="14 2 14 8 20 8"></polyline>
-                          <line x1="16" y1="13" x2="8" y2="13"></line>
-                          <line x1="16" y1="17" x2="8" y2="17"></line>
-                          <polyline points="10 9 9 9 8 9"></polyline>
-                        </svg>
+                    <div key={index} className="flex items-center justify-between p-2 hover:bg-muted/50">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <File className="h-4 w-4 text-primary shrink-0" />
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">{file.name}</div>
+                          <div className="text-xs text-muted-foreground">{file.size}</div>
+                        </div>
                       </div>
-                      <div className="file-details">
-                        <div className="file-name">{file.name}</div>
-                        <div className="file-size">{file.size}</div>
-                      </div>
-                      <button 
-                        className="remove-file-button"
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeFile(index);
                         }}
                       >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"></circle>
-                          <line x1="15" y1="9" x2="9" y2="15"></line>
-                          <line x1="9" y1="9" x2="15" y2="15"></line>
-                        </svg>
-                      </button>
-                    </li>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
                   ))}
-                </ul>
-                
-                <div className="action-buttons">
-                  <button 
-                    className="add-more-button"
-                    onClick={handleFileSelect}
-                    disabled={status === 'processing'}
-                  >
-                    {status === 'processing' ? 'Processing...' : 'Add More Files'}
-                  </button>
-                  
-                  <button 
-                    className="share-button"
-                    onClick={handleShare}
-                    disabled={status === 'processing' || selectedFiles.length === 0}
-                  >
-                    {status === 'processing' ? (
-                      <>
-                        <div className="spinner"></div>
-                        Preparing...
-                      </>
-                    ) : (
-                      'Generate Share Code'
-                    )}
-                  </button>
                 </div>
-              </div>
-            )}
-          </div>
-          
-          {statusMessage && (
-            <div className={`status-message ${status === 'error' ? 'error' : ''}`}>
-              {statusMessage}
-            </div>
+              </CardContent>
+              <CardFooter className="flex flex-col gap-3 pt-2 pb-5">
+                <Button
+                  variant="outline"
+                  className="flex items-center gap-2 w-full"
+                  onClick={handleFileSelect}
+                  disabled={status === 'processing'}
+                  size="sm"
+                >
+                  <Plus className="h-4 w-4" />
+                  {status === 'processing' ? 'Processing...' : 'Add More Files'}
+                </Button>
+
+                <Button
+                  className="flex items-center gap-2 w-full"
+                  onClick={handleShare}
+                  disabled={status === 'processing' || selectedFiles.length === 0}
+                >
+                  {status === 'processing' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Preparing...</span>
+                    </>
+                  ) : (
+                    'Generate Share Code'
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
           )}
-        </>
+
+          {status === 'processing' && (
+            <Card className="border-primary/20">
+              <CardContent className="py-4 px-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">Preparing files...</span>
+                    <span className="font-medium">30%</span>
+                  </div>
+                  <Progress value={30} className="h-2" />
+                  <p className="text-xs sm:text-sm text-center text-muted-foreground">{statusMessage}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {status === 'error' && statusMessage && (
+            <Card className="border-destructive/20 bg-destructive/5">
+              <CardContent className="py-4 px-4">
+                <div className="flex items-center gap-2 text-destructive">
+                  <X className="h-4 w-4 shrink-0" />
+                  <p className="text-sm">{statusMessage}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );
