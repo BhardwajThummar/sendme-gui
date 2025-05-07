@@ -14,6 +14,7 @@
     "android:run": "tauri android run"
   },
   "dependencies": {
+    "@radix-ui/react-tabs": "^1.1.11",
     "@tailwindcss/vite": "^4.1.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "~2",

@@ -212,32 +212,32 @@ const FileShare: React.FC = () => {
   const { addToast } = useToast();
 
   return (
-    <div className="w-full max-w-md mx-auto">
+    <div className="w-full">
       {shareCode ? (
-        <Card className="border-primary/20">
-          <CardHeader className="text-center pb-2 space-y-2 pt-6">
-            <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-primary/10 flex items-center justify-center">
-              <CheckCircle className="h-7 w-7 sm:h-8 sm:w-8 text-primary" />
+        <div className="space-y-6">
+          <div className="flex flex-col items-center justify-center">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+              <CheckCircle className="h-8 w-8 text-primary" />
             </div>
-            <CardTitle className="text-xl sm:text-2xl">Your Share Code</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-center px-4">
-            <div className="flex flex-wrap justify-center items-center gap-2 text-2xl sm:text-3xl font-mono bg-muted/50 p-4 rounded-lg my-2 border border-primary/20">
+            <h2 className="text-xl font-bold text-center">Your Share Code</h2>
+
+            <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
               {shareCode.split('').map((char, index) => (
                 <span
                   key={index}
-                  className="inline-flex items-center justify-center w-10 h-12 sm:w-12 sm:h-14 rounded-md bg-background border border-primary/20 shadow-sm"
+                  className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
                 >
                   {char}
                 </span>
               ))}
             </div>
 
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-sm text-center px-4">
               Share this code with the recipient to let them download your files
             </p>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-3 justify-center pb-6">
+          </div>
+
+          <div className="flex flex-col gap-3 px-2">
             <Button
               onClick={copyCodeToClipboard}
               className="flex items-center justify-center gap-2 w-full"
@@ -253,95 +253,76 @@ const FileShare: React.FC = () => {
             >
               Share Different Files
             </Button>
-          </CardFooter>
-        </Card>
+          </div>
+        </div>
       ) : (
         <div className="space-y-4">
-          <Card className="border-primary/20">
-            <CardHeader className="pb-2 pt-5">
-              <CardTitle className="text-lg sm:text-xl text-center">Select Files to Share</CardTitle>
-            </CardHeader>
-            <CardContent className="px-4">
-              <div className="grid grid-cols-1 gap-3">
-                <Button
-                  variant="outline"
-                  className="h-auto py-5 flex flex-col items-center gap-3 border-primary/20 hover:border-primary/50 hover:bg-primary/5"
-                  onClick={handleFileSelect}
-                  disabled={status === 'processing'}
-                >
-                  {status === 'processing' ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      <span>Processing...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload className="h-8 w-8 text-primary" />
-                      <div className="text-center">
-                        <div className="font-medium text-sm sm:text-base">Select Files</div>
-                        <div className="text-xs text-muted-foreground">Choose individual files to share</div>
-                      </div>
-                    </>
-                  )}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-auto py-5 flex flex-col items-center gap-3 border-primary/20 hover:border-primary/50 hover:bg-primary/5"
-                  onClick={handleDirSelect}
-                  disabled={status === 'processing'}
-                >
-                  {status === 'processing' ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      <span>Processing...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <FolderOpen className="h-8 w-8 text-primary" />
-                      <div className="text-center">
-                        <div className="font-medium text-sm sm:text-base">Select Folders</div>
-                        <div className="text-xs text-muted-foreground">Choose entire folders to share</div>
-                      </div>
-                    </>
-                  )}
-                </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
+              onClick={handleFileSelect}
+              disabled={status === 'processing'}
+            >
+              {status === 'processing' ? (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              ) : (
+                <Upload className="h-6 w-6 text-primary" />
+              )}
+              <div className="text-center">
+                <div className="font-medium text-xs">Select Files</div>
               </div>
-            </CardContent>
-          </Card>
+            </Button>
+
+            <Button
+              variant="outline"
+              className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
+              onClick={handleDirSelect}
+              disabled={status === 'processing'}
+            >
+              {status === 'processing' ? (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              ) : (
+                <FolderOpen className="h-6 w-6 text-primary" />
+              )}
+              <div className="text-center">
+                <div className="font-medium text-xs">Select Folders</div>
+              </div>
+            </Button>
+          </div>
 
           {selectedFiles.length > 0 && (
-            <Card className="border-primary/20">
-              <CardHeader className="pb-2 pt-5">
-                <CardTitle className="text-lg sm:text-xl">Selected Files ({selectedFiles.length})</CardTitle>
-              </CardHeader>
-              <CardContent className="px-4">
-                <div className="border rounded-lg divide-y max-h-[250px] overflow-y-auto">
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 hover:bg-muted/50">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <File className="h-4 w-4 text-primary shrink-0" />
-                        <div className="min-w-0">
-                          <div className="font-medium text-sm truncate">{file.name}</div>
-                          <div className="text-xs text-muted-foreground">{file.size}</div>
-                        </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">Selected Files ({selectedFiles.length})</h3>
+              </div>
+
+              <div className="border border-border rounded-lg divide-y divide-border max-h-[200px] overflow-y-auto">
+                {selectedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center justify-between p-2 hover:bg-muted">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <File className="h-4 w-4 text-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-medium text-xs truncate">{file.name}</div>
+                        <div className="text-xs text-muted-foreground">{file.size}</div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFile(index);
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-              <CardFooter className="flex flex-col gap-3 pt-2 pb-5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFile(index);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <Button
                   variant="outline"
                   className="flex items-center gap-2 w-full"
@@ -349,7 +330,7 @@ const FileShare: React.FC = () => {
                   disabled={status === 'processing'}
                   size="sm"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3 w-3" />
                   {status === 'processing' ? 'Processing...' : 'Add More Files'}
                 </Button>
 
@@ -367,34 +348,28 @@ const FileShare: React.FC = () => {
                     'Generate Share Code'
                   )}
                 </Button>
-              </CardFooter>
-            </Card>
+              </div>
+            </div>
           )}
 
           {status === 'processing' && (
-            <Card className="border-primary/20">
-              <CardContent className="py-4 px-4">
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-muted-foreground">Preparing files...</span>
-                    <span className="font-medium">30%</span>
-                  </div>
-                  <Progress value={30} className="h-2" />
-                  <p className="text-xs sm:text-sm text-center text-muted-foreground">{statusMessage}</p>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="space-y-2 mt-4 p-3 border border-border rounded-md bg-muted">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-muted-foreground">Preparing files...</span>
+                <span className="font-medium">30%</span>
+              </div>
+              <Progress value={30} className="h-2" />
+              <p className="text-xs text-center text-muted-foreground">{statusMessage}</p>
+            </div>
           )}
 
           {status === 'error' && statusMessage && (
-            <Card className="border-destructive/20 bg-destructive/5">
-              <CardContent className="py-4 px-4">
-                <div className="flex items-center gap-2 text-destructive">
-                  <X className="h-4 w-4 shrink-0" />
-                  <p className="text-sm">{statusMessage}</p>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="p-3 rounded-md bg-muted border border-destructive">
+              <div className="flex items-center gap-2 text-destructive">
+                <X className="h-4 w-4 shrink-0" />
+                <p className="text-xs">{statusMessage}</p>
+              </div>
+            </div>
           )}
         </div>
       )}
