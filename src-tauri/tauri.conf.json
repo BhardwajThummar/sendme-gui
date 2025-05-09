@@ -16,7 +16,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "android": {
+      "minSdkVersion": 29
+    }
   },
   "productName": "sendme-gui-tauri-1",
   "mainBinaryName": "sendme-gui-tauri-1",

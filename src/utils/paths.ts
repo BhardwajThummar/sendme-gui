@@ -1,14 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Store } from '@tauri-apps/plugin-store';
 
-// Create a store instance for saving user preferences
-const store = new Store('user-preferences.json');
-
 // Key for storing the download path
 const DOWNLOAD_PATH_KEY = 'download_path';
+const STORE_NAME = 'user-preferences.json';
+
+// Create a store instance for saving user preferences
+// In Tauri v2, we need to use Store.create() instead of new Store()
+let storePromise = Store.load(STORE_NAME);
 
 export async function getDownloadsFolderPath(): Promise<string> {
   try {
+    // Get the store instance
+    const store = await storePromise;
+
     // First check if we have a saved path in the store
     const savedPath = await store.get<string>(DOWNLOAD_PATH_KEY);
     if (savedPath) {
@@ -33,6 +38,9 @@ export async function getDownloadsFolderPath(): Promise<string> {
 
 export async function saveDownloadPath(path: string): Promise<void> {
   try {
+    // Get the store instance
+    const store = await storePromise;
+
     // Save the path to the store
     await store.set(DOWNLOAD_PATH_KEY, path);
     await store.save(); // Persist the changes to disk

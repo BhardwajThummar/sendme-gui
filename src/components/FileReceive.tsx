@@ -5,16 +5,8 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { useToast } from '@/components/ui/toast';
 import {
   Download,
   FolderOpen,
@@ -334,8 +326,6 @@ const FileReceive: React.FC = () => {
       return `${seconds}s`;
     }
   };
-
-  const { addToast } = useToast();
 
   return (
     <div className="w-full">
