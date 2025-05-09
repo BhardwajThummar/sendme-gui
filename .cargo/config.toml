@@ -1,0 +1,4 @@
+[target.aarch64-linux-android]
+#replace user_name in following paths with system user for mac
+ar = "/Users/user_name/Library/Android/sdk/ndk/29.0.13113456/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android-ar"
+linker = "/Users/user_name/Library/Android/sdk/ndk/29.0.13113456/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android21-clang"
