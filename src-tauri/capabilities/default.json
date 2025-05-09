@@ -1,10 +1,8 @@
 {
-  "identifier": "migrated",
-  "description": "permissions that were migrated from v1",
+  "identifier": "default",
+  "description": "permissions for file sending application with full file access",
   "local": true,
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "fs:allow-read-file",
@@ -13,13 +11,34 @@
     "fs:allow-copy-file",
     "fs:allow-mkdir",
     "fs:allow-remove",
-    "fs:allow-remove",
     "fs:allow-rename",
     "fs:allow-exists",
     {
       "identifier": "fs:scope",
+      "allow": ["**"]
+    },
+    {
+      "identifier": "fs:allow-write",
       "allow": [
-        "**"
+        {
+          "path": "/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-create",
+      "allow": [
+        {
+          "path": "/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "/**"
+        }
       ]
     },
     "shell:allow-open",
@@ -28,6 +47,7 @@
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
+    "core:default",
     "shell:default",
     "fs:default",
     "store:default",
