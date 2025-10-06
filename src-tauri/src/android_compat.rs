@@ -41,81 +41,71 @@ pub mod android {
         Ok(external_files)
     }
 
-    // Provide Android implementations using futures/async runtime
-    pub fn send_file_minimal(file_path: String, verbose: bool) -> Result<String, String> {
-        // Use tokio runtime to run async function synchronously on Android
-        let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    // Provide Android implementations using async/await
+    pub async fn send_file_minimal(file_path: String, verbose: bool) -> Result<String, String> {
+        // Import necessary types
+        use crate::sendme::{
+            create_blob, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption,
+            SendArgs,
+        };
+        use std::path::PathBuf;
 
-        runtime.block_on(async {
-            // Import necessary types
-            use crate::sendme::{
-                create_blob, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption,
-                SendArgs,
-            };
-            use std::path::PathBuf;
+        let send_args = SendArgs {
+            path: PathBuf::from(file_path),
+            ticket_type: AddrInfoOptions::RelayAndAddresses,
+            common: CommonArgs {
+                magic_ipv4_addr: None,
+                magic_ipv6_addr: None,
+                format: Format::Hex,
+                verbose: if verbose { 1 } else { 0 },
+                relay: RelayModeOption::Default,
+            },
+        };
 
-            let send_args = SendArgs {
-                path: PathBuf::from(file_path),
-                ticket_type: AddrInfoOptions::RelayAndAddresses,
-                common: CommonArgs {
-                    magic_ipv4_addr: None,
-                    magic_ipv6_addr: None,
-                    format: Format::Hex,
-                    verbose: if verbose { 1 } else { 0 },
-                    relay: RelayModeOption::Default,
-                },
-            };
+        let (ticket, _router, _blobs_data_dir) =
+            start_send(send_args).await.map_err(|e| e.to_string())?;
 
-            let (ticket, _router, _blobs_data_dir) =
-                start_send(send_args).await.map_err(|e| e.to_string())?;
-
-            let blob = ticket.to_string();
-            match create_blob(blob).await {
-                Ok(code) => Ok(code),
-                Err(err) => Err(format!("Failed to create blob: {}", err)),
-            }
-        })
+        let blob = ticket.to_string();
+        match create_blob(blob).await {
+            Ok(code) => Ok(code),
+            Err(err) => Err(format!("Failed to create blob: {}", err)),
+        }
     }
 
-    pub fn receive_file_minimal(
+    pub async fn receive_file_minimal(
         ticket: String,
         file_storage_path: String,
         verbose: bool,
     ) -> Result<String, String> {
-        // Use tokio runtime to run async function synchronously on Android
-        let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+        use crate::sendme::{
+            get_blob, receive_file_minimal as receive_impl, CommonArgs, Format, ReceiveArgs,
+            RelayModeOption,
+        };
+        use iroh_blobs::ticket::BlobTicket;
+        use std::str::FromStr;
 
-        runtime.block_on(async {
-            use crate::sendme::{
-                get_blob, receive_file_minimal as receive_impl, CommonArgs, Format, ReceiveArgs,
-                RelayModeOption,
-            };
-            use iroh_blobs::ticket::BlobTicket;
-            use std::str::FromStr;
+        let blob = match get_blob(ticket).await {
+            Ok(blob) => blob,
+            Err(_err) => return Err("Failed to get blob".to_string()),
+        };
 
-            let blob = match get_blob(ticket).await {
-                Ok(blob) => blob,
-                Err(_err) => return Err("Failed to get blob".to_string()),
-            };
+        let ticket = BlobTicket::from_str(&blob[0]).map_err(|e| e.to_string())?;
+        let ticket_string = ticket.to_string();
 
-            let ticket = BlobTicket::from_str(&blob[0]).map_err(|e| e.to_string())?;
-            let ticket_string = ticket.to_string();
+        let _receive_args = ReceiveArgs {
+            ticket: ticket,
+            common: CommonArgs {
+                magic_ipv4_addr: None,
+                magic_ipv6_addr: None,
+                format: Format::Hex,
+                verbose: if verbose { 1 } else { 0 },
+                relay: RelayModeOption::Default,
+            },
+        };
 
-            let _receive_args = ReceiveArgs {
-                ticket: ticket,
-                common: CommonArgs {
-                    magic_ipv4_addr: None,
-                    magic_ipv6_addr: None,
-                    format: Format::Hex,
-                    verbose: if verbose { 1 } else { 0 },
-                    relay: RelayModeOption::Default,
-                },
-            };
-
-            receive_impl(ticket_string, file_storage_path, verbose)
-                .await
-                .map_err(|e| e.to_string())
-        })
+        receive_impl(ticket_string, file_storage_path, verbose)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     pub fn stop_sharing() -> Result<(), String> {
