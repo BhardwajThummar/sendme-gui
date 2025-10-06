@@ -626,7 +626,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
     let client = Client::new();
     let payload = BlobRequest { blobs: vec![blob] };
     let response = client
-        .post("https://send.hindalert.com/api/code/")
+        .post(&format!("{}/api/code/", std::env::var("BASE_URL").unwrap()))
         .json(&payload)
         .send()
         .await?
@@ -638,7 +638,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
 
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     let client = Client::new();
-    let url: String = format!("{}{}", "https://send.hindalert.com/api/code/", code);
+    let url: String = format!("{}/api/code/{}", std::env::var("BASE_URL").unwrap(), code);
 
     let response = client
         .get(&url)
