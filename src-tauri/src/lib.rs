@@ -71,7 +71,7 @@ async fn send_file_command(
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        android_compat::android::send_file_minimal(file_path, verbose)
+        android_compat::android::send_file_minimal(file_path, verbose).await
     }
 
     #[cfg(not(target_os = "android"))]
@@ -136,7 +136,7 @@ async fn receive_file_with_stats(
         let _ = window.emit("download_status", "Connecting to sender...");
 
         // Call the Android-specific implementation
-        let result = android_compat::android::receive_file_minimal(ticket, file_storage_path.clone(), verbose);
+        let result = android_compat::android::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
 
         // Handle the result
         match result {
