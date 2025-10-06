@@ -47,8 +47,46 @@ use walkdir::WalkDir;
 const DIR_PREFIX: &str = ".sendme-";
 
 lazy_static::lazy_static! {
-    static ref HOME_DIR: std::path::PathBuf = dirs::home_dir().unwrap();
-    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(format!("{}temp", DIR_PREFIX));
+    static ref HOME_DIR: std::path::PathBuf = get_home_dir();
+    static ref CWD: std::path::PathBuf = get_temp_dir();
+}
+
+// Platform-specific path resolution
+fn get_home_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use app-specific directory
+        use std::path::PathBuf;
+        std::env::var("EXTERNAL_STORAGE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/sdcard"))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+    }
+}
+
+fn get_temp_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use app-specific external files directory
+        use std::path::PathBuf;
+        let mut path = if let Ok(external_storage) = std::env::var("EXTERNAL_STORAGE") {
+            let mut p = PathBuf::from(external_storage);
+            p.push("Android/data/com.sendme_gui_tauri_1.app/files");
+            p
+        } else {
+            PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files")
+        };
+        path.push(format!("{}temp", DIR_PREFIX));
+        path
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home.join("Documents").join(format!("{}temp", DIR_PREFIX))
+    }
 }
 
 /// Send a file or directory between two machines, using blake3 verified streaming.

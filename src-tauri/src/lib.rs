@@ -9,13 +9,17 @@ mod sender_state;
 mod sendme; // Replace with the name of the module that contains your functions // New module for event types
 mod android_compat; // Compatibility layer for Android
 
-use dirs;
 use sender_state::{SenderState, SharedSenderState};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Instant;
 use tauri::{State, Window, Emitter};
+
+#[cfg(not(target_os = "android"))]
+use std::time::Instant;
+
+#[cfg(not(target_os = "android"))]
+use dirs;
 
 use dotenv::dotenv;
 use std::env; // Import the env module
@@ -25,15 +29,45 @@ use tauri_plugin_store;
 const DIR_PREFIX: &str = ".sendme-";
 
 lazy_static::lazy_static! {
-    static ref HOME_DIR: std::path::PathBuf = dirs::home_dir().unwrap();
-    static ref CWD: std::path::PathBuf = HOME_DIR.join("Documents").join(format!("{}temp", DIR_PREFIX));
+    static ref HOME_DIR: std::path::PathBuf = get_home_dir();
+    static ref CWD: std::path::PathBuf = get_temp_dir();
+}
+
+// Platform-specific path resolution
+fn get_home_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use app-specific directory
+        android_compat::android::get_android_external_files_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("/sdcard"))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+    }
+}
+
+fn get_temp_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use app-specific external files directory
+        let mut path = android_compat::android::get_android_external_files_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files"));
+        path.push(format!("{}temp", DIR_PREFIX));
+        path
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home.join("Documents").join(format!("{}temp", DIR_PREFIX))
+    }
 }
 
 #[tauri::command]
 async fn send_file_command(
     file_path: String,
     verbose: bool,
-    state: State<'_, SharedSenderState>,
+    _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
@@ -42,11 +76,11 @@ async fn send_file_command(
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::send_file_minimal(file_path, verbose, state.clone()).await {
+        match sendme::send_file_minimal(file_path, verbose, _state.clone()).await {
             Ok(ticket) => Ok(ticket),
             Err(_e) => {
                 // stop sharing if it fails
-                let _e = sendme::stop_sharing(state).await;
+                let _e = sendme::stop_sharing(_state).await;
                 // Err(e.to_string())
                 // Emit error event if sending failed
                 Err(format!("Failed to send file"))
@@ -56,7 +90,7 @@ async fn send_file_command(
 }
 
 #[tauri::command]
-async fn stop_sharing_command(state: State<'_, SharedSenderState>) -> Result<(), String> {
+async fn stop_sharing_command(_state: State<'_, SharedSenderState>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         android_compat::android::stop_sharing()
@@ -64,7 +98,7 @@ async fn stop_sharing_command(state: State<'_, SharedSenderState>) -> Result<(),
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::stop_sharing(state.clone()).await {
+        match sendme::stop_sharing(_state.clone()).await {
             Ok(()) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -254,9 +288,26 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
 
 #[tauri::command]
 fn get_downloads_dir() -> Result<String, String> {
-    match dirs::download_dir() {
-        Some(path) => Ok(path.to_string_lossy().to_string()),
-        None => Err("Could not determine downloads directory".to_string()),
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use app-specific Downloads directory
+        match android_compat::android::get_android_downloads_dir() {
+            Ok(path) => {
+                // Create the directory if it doesn't exist
+                if let Err(e) = std::fs::create_dir_all(&path) {
+                    eprintln!("Failed to create downloads directory: {}", e);
+                }
+                Ok(path.to_string_lossy().to_string())
+            }
+            Err(e) => Err(format!("Could not determine downloads directory: {}", e)),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        match dirs::download_dir() {
+            Some(path) => Ok(path.to_string_lossy().to_string()),
+            None => Err("Could not determine downloads directory".to_string()),
+        }
     }
 }
 
