@@ -44,26 +44,61 @@ const FileReceive: React.FC = () => {
     elapsedTime: string;
     speed: string;
   } | null>(null);
+  const [isAndroid, setIsAndroid] = useState(false);
 
   // Create refs for each input field
   const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null));
 
   // Initialize download path and set up event listeners
   useEffect(() => {
-    const initPath = async () => {
-      try {
-        // Get the downloads folder path (which now defaults to the Downloads folder)
-        const path = await getDownloadsFolderPath();
+    const isAndroidPlatform = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
-        if (path) {
-          setDownloadPath(path);
-        } else {
-          // If for some reason we couldn't get the downloads folder, try to get it directly
-          const downloadsDir = await invoke<string>('get_downloads_dir');
-          setDownloadPath(downloadsDir || '');
+    // Detect if running on Android
+    setIsAndroid(isAndroidPlatform);
+
+    // On Android, immediately set the default path to system Downloads
+    if (isAndroidPlatform) {
+      const defaultAndroidPath = '/sdcard/Download';
+      setDownloadPath(defaultAndroidPath);
+      console.log('[FileReceive] Android detected, set default path:', defaultAndroidPath);
+    }
+
+    const initPath = async () => {
+      // Skip async path lookup on Android since we already set it
+      if (isAndroidPlatform) {
+        console.log('[FileReceive] Skipping async path lookup on Android');
+        return;
+      }
+
+      try {
+        console.log('[FileReceive] Initializing download path...');
+
+        // Try to get the downloads folder path
+        let path = '';
+
+        try {
+          path = await getDownloadsFolderPath();
+          console.log('[FileReceive] getDownloadsFolderPath returned:', path);
+        } catch (err) {
+          console.error('[FileReceive] getDownloadsFolderPath error:', err);
         }
+
+        if (!path) {
+          // If for some reason we couldn't get the downloads folder, try to get it directly
+          console.log('[FileReceive] Trying get_downloads_dir command...');
+          try {
+            const downloadsDir = await invoke<string>('get_downloads_dir');
+            console.log('[FileReceive] get_downloads_dir returned:', downloadsDir);
+            path = downloadsDir;
+          } catch (err) {
+            console.error('[FileReceive] get_downloads_dir error:', err);
+          }
+        }
+
+        console.log('[FileReceive] Final download path:', path);
+        setDownloadPath(path || '');
       } catch (error) {
-        console.error('Error getting downloads folder:', error);
+        console.error('[FileReceive] Error in initPath:', error);
         setDownloadPath('');
       }
     };
@@ -226,11 +261,15 @@ const FileReceive: React.FC = () => {
   // Handle the browse button for download path
   const handleBrowse = async () => {
     try {
+      console.log('[FileReceive] Browse clicked, isAndroid:', isAndroid);
+
       const selected = await open({
         directory: true,
-        multiple: false, // Changed to false since we only need one directory
+        multiple: false,
         title: 'Select Download Location',
       });
+
+      console.log('[FileReceive] Folder selected:', selected);
 
       if (selected && !Array.isArray(selected)) {
         // Update the UI with the selected path
@@ -238,15 +277,17 @@ const FileReceive: React.FC = () => {
 
         // Save the selected path for future use
         await saveDownloadPath(selected);
+        console.log('[FileReceive] Download path updated to:', selected);
       }
     } catch (error) {
-      console.error('Error selecting directory:', error);
+      console.error('[FileReceive] Error selecting directory:', error);
     }
   };
 
   // Handle the receive button
   const handleReceive = async () => {
     const fullCode = code.join('');
+    console.log('[FileReceive] handleReceive called, code:', fullCode, 'downloadPath:', downloadPath);
 
     if (fullCode.length !== 6) {
       setStatus('error');
@@ -442,10 +483,21 @@ const FileReceive: React.FC = () => {
                 disabled={status === 'processing'}
                 className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
                 size="icon"
+                title="Browse for folder"
               >
                 <FolderOpen className="h-4 w-4" />
               </Button>
             </div>
+            {downloadPath && (
+              <p className="text-xs text-muted-foreground">
+                Files will be saved to: {downloadPath}
+              </p>
+            )}
+            {!downloadPath && (
+              <p className="text-xs text-yellow-600">
+                Loading download path...
+              </p>
+            )}
           </div>
 
           <div className="pt-2">
@@ -471,6 +523,22 @@ const FileReceive: React.FC = () => {
                 </>
               )}
             </Button>
+
+            {/* Debug info - remove this after testing */}
+            <div className="text-xs bg-muted p-2 rounded mt-2 space-y-1 font-mono">
+              <div><strong>Debug Info:</strong></div>
+              <div>Android: {isAndroid ? 'Yes' : 'No'}</div>
+              <div>Code: "{code.join('')}" (len: {code.join('').length})</div>
+              <div>Path: {downloadPath ? `"${downloadPath}"` : '(empty)'}</div>
+              <div>Status: {status}</div>
+              <div>Disabled: {(code.join('').length !== 6 || !downloadPath || status === 'processing') ? 'YES' : 'NO'}</div>
+              <div>Disabled reasons:</div>
+              <div className="ml-4">
+                {code.join('').length !== 6 && <div>- Code not 6 chars</div>}
+                {!downloadPath && <div>- No download path</div>}
+                {status === 'processing' && <div>- Processing</div>}
+              </div>
+            </div>
 
             {(status === 'error' || status === 'success') && (
               <Button

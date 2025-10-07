@@ -1,19 +1,20 @@
 // src/components/FileShare.tsx
-import React, { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { resolveFileEntries } from "@/utils/fileSelection";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
-  Upload,
-  File,
-  X,
-  Copy,
-  FolderOpen,
-  Plus,
   CheckCircle,
+  Copy,
+  File,
+  FolderOpen,
   Loader2,
-} from 'lucide-react';
+  Plus,
+  Upload,
+  X,
+} from "lucide-react";
+import React, { useEffect, useState } from "react";
 
 interface FileInfo {
   name: string;
@@ -24,153 +25,108 @@ interface FileInfo {
 const FileShare: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
   const [status, setStatus] = useState<
-    'idle' | 'processing' | 'success' | 'error'
-  >('idle');
-  const [statusMessage, setStatusMessage] = useState<string>('');
-  const [shareCode, setShareCode] = useState<string>('');
+    "idle" | "processing" | "success" | "error"
+  >("idle");
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [shareCode, setShareCode] = useState<string>("");
+  const [isAndroid, setIsAndroid] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined") {
+      setIsAndroid(/android/i.test(navigator.userAgent));
+    }
+  }, []);
 
   // Format file size for display
   const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024) return bytes + " B";
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  const appendResolvedFiles = (
+    files: { name: string; path: string; size: string }[]
+  ) => {
+    if (!files.length) {
+      return;
+    }
+
+    setSelectedFiles((prev) => {
+      const existingPaths = new Set(prev.map((file) => file.path));
+      const uniqueNewFiles = files.filter(
+        (file) => !existingPaths.has(file.path)
+      );
+      return uniqueNewFiles.length ? [...prev, ...uniqueNewFiles] : prev;
+    });
+  };
+
+  const processSelection = async (selection: string | string[] | null) => {
+    if (!selection) {
+      return;
+    }
+
+    setStatus("processing");
+    setStatusMessage("Getting file information...");
+
+    try {
+      const resolved = await resolveFileEntries(selection);
+
+      const formatted = resolved.map((file) => ({
+        name: file.name,
+        path: file.path,
+        size:
+          typeof file.sizeBytes === "number"
+            ? formatFileSize(file.sizeBytes)
+            : "Size unavailable",
+      }));
+
+      appendResolvedFiles(formatted);
+      setStatus("idle");
+      setStatusMessage("");
+    } catch (error) {
+      console.error("Error resolving file selection:", error);
+      setStatus("error");
+      setStatusMessage("Error getting file information");
+    }
   };
 
   // Handle file selection using Tauri's dialog API
   const handleFileSelect = async () => {
     try {
-      console.log('Opening file dialog...');
+      console.log("Opening file dialog...");
       const selected = await open({
         multiple: true,
-        // directory: true,
-        title: 'Select Files to Share',
+        title: "Select Files to Share",
       });
 
-      console.log('Files selected:', selected);
-
-      if (selected && Array.isArray(selected) && selected.length > 0) {
-        setStatus('processing');
-        setStatusMessage('Getting file information...');
-
-        // Get actual file sizes using backend command
-        const filePromises = selected.map(async (path) => {
-          // Extract filename from path
-          const pathParts = path.split(/[/\\]/);
-          const fileName = pathParts[pathParts.length - 1];
-
-          try {
-            // Get actual file size from Tauri backend
-            const size = await invoke<number>('get_file_size', { path });
-            return {
-              name: fileName,
-              path: path,
-              size: formatFileSize(size),
-            };
-          } catch (error) {
-            console.error(`Error getting size for file ${path}:`, error);
-            return {
-              name: fileName,
-              path: path,
-              size: 'Size unavailable',
-            };
-          }
-        });
-
-        try {
-          // Wait for all file size promises to resolve
-          const newFiles = await Promise.all(filePromises);
-          console.log('Processed files with actual sizes:', newFiles);
-
-          // Filter out duplicates based on file path
-          setSelectedFiles((prev) => {
-            const existingPaths = new Set(prev.map((file) => file.path));
-            const uniqueNewFiles = newFiles.filter(
-              (file) => !existingPaths.has(file.path)
-            );
-            return [...prev, ...uniqueNewFiles];
-          });
-
-          setStatus('idle');
-          setStatusMessage('');
-        } catch (error) {
-          console.error('Error processing files:', error);
-          setStatus('error');
-          setStatusMessage('Error getting file information');
-        }
-      }
+      console.log("Files selected:", selected);
+      await processSelection(selected ?? null);
     } catch (error) {
-      console.error('Error selecting files:', error);
-      setStatus('error');
+      console.error("Error selecting files:", error);
+      setStatus("error");
       setStatusMessage(`Error selecting files: ${error}`);
     }
   };
   // Handle directory selection using Tauri's dialog API
   const handleDirSelect = async () => {
     try {
-      console.log('Opening file dialog...');
+      console.log("Opening file dialog...");
       const selected = await open({
         multiple: true,
         directory: true,
-        title: 'Select Directories to Share',
+        title: "Select Directories to Share",
       });
 
-      console.log('Directories selected:', selected);
+      console.log("Directories selected:", selected);
 
       if (selected && Array.isArray(selected) && selected.length > 0) {
-        setStatus('processing');
-        setStatusMessage('Getting file information...');
-
-        // Get actual file sizes using backend command
-        const filePromises = selected.map(async (path) => {
-          // Extract filename from path
-          const pathParts = path.split(/[/\\]/);
-          const fileName = pathParts[pathParts.length - 1];
-
-          try {
-            // Get actual file size from Tauri backend
-            const size = await invoke<number>('get_file_size', { path });
-            return {
-              name: fileName,
-              path: path,
-              size: formatFileSize(size),
-            };
-          } catch (error) {
-            console.error(`Error getting size for file ${path}:`, error);
-            return {
-              name: fileName,
-              path: path,
-              size: 'Size unavailable',
-            };
-          }
-        });
-
-        try {
-          // Wait for all file size promises to resolve
-          const newFiles = await Promise.all(filePromises);
-          console.log('Processed files with actual sizes:', newFiles);
-
-          // Filter out duplicates based on file path
-          setSelectedFiles((prev) => {
-            const existingPaths = new Set(prev.map((file) => file.path));
-            const uniqueNewFiles = newFiles.filter(
-              (file) => !existingPaths.has(file.path)
-            );
-            return [...prev, ...uniqueNewFiles];
-          });
-
-          setStatus('idle');
-          setStatusMessage('');
-        } catch (error) {
-          console.error('Error processing files:', error);
-          setStatus('error');
-          setStatusMessage('Error getting file information');
-        }
+        await processSelection(selected);
       }
     } catch (error) {
-      console.error('Error selecting files:', error);
-      setStatus('error');
+      console.error("Error selecting files:", error);
+      setStatus("error");
       setStatusMessage(`Error selecting files: ${error}`);
     }
   };
@@ -179,38 +135,38 @@ const FileShare: React.FC = () => {
   const removeFile = (index: number) => {
     setSelectedFiles((files) => files.filter((_, i) => i !== index));
     if (selectedFiles.length <= 1) {
-      setShareCode('');
+      setShareCode("");
     }
   };
 
   // Handle the share button click
   const handleShare = async () => {
     if (selectedFiles.length === 0) {
-      setStatus('error');
-      setStatusMessage('Please select at least one file');
+      setStatus("error");
+      setStatusMessage("Please select at least one file");
       return;
     }
 
-    setStatus('processing');
-    setStatusMessage('Preparing your files...');
+    setStatus("processing");
+    setStatusMessage("Preparing your files...");
 
     try {
       // Use the first selected file path since the backend expects a single filePath
       const filePath = selectedFiles[0].path;
 
       // Call the Tauri command with the correct parameter name
-      const result = await invoke<string>('send_file_command', {
+      const result = await invoke<string>("send_file_command", {
         filePath: filePath,
         verbose: false,
       });
 
       // Set the share code received from backend
       setShareCode(result);
-      setStatus('success');
-      setStatusMessage('Your files are ready to share!');
+      setStatus("success");
+      setStatusMessage("Your files are ready to share!");
     } catch (error) {
-      console.error('Error sharing files:', error);
-      setStatus('error');
+      console.error("Error sharing files:", error);
+      setStatus("error");
       setStatusMessage(`Error: ${error}`);
     }
   };
@@ -218,12 +174,12 @@ const FileShare: React.FC = () => {
   // Copy share code to clipboard
   const copyCodeToClipboard = () => {
     navigator.clipboard.writeText(shareCode);
-    setStatusMessage('Code copied to clipboard!');
+    setStatusMessage("Code copied to clipboard!");
 
     // Reset the message after 2 seconds
     setTimeout(() => {
-      if (status === 'success') {
-        setStatusMessage('Your files are ready to share!');
+      if (status === "success") {
+        setStatusMessage("Your files are ready to share!");
       }
     }, 2000);
   };
@@ -231,9 +187,9 @@ const FileShare: React.FC = () => {
   // Reset the share process
   const handleReset = () => {
     setSelectedFiles([]);
-    setStatus('idle');
-    setStatusMessage('');
-    setShareCode('');
+    setStatus("idle");
+    setStatusMessage("");
+    setShareCode("");
   };
 
   return (
@@ -247,7 +203,7 @@ const FileShare: React.FC = () => {
             <h2 className="text-xl font-bold text-center">Your Share Code</h2>
 
             <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
-              {shareCode.split('').map((char, index) => (
+              {shareCode.split("").map((char, index) => (
                 <span
                   key={index}
                   className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
@@ -283,9 +239,9 @@ const FileShare: React.FC = () => {
               variant="outline"
               className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
               onClick={handleFileSelect}
-              disabled={status === 'processing'}
+              disabled={status === "processing"}
             >
-              {status === 'processing' ? (
+              {status === "processing" ? (
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
               ) : (
                 <Upload className="h-6 w-6 text-primary" />
@@ -299,9 +255,9 @@ const FileShare: React.FC = () => {
               variant="outline"
               className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
               onClick={handleDirSelect}
-              disabled={status === 'processing'}
+              disabled={status === "processing" || isAndroid}
             >
-              {status === 'processing' ? (
+              {status === "processing" ? (
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
               ) : (
                 <FolderOpen className="h-6 w-6 text-primary" />
@@ -357,34 +313,34 @@ const FileShare: React.FC = () => {
                   variant="outline"
                   className="flex items-center gap-2 w-full"
                   onClick={handleFileSelect}
-                  disabled={status === 'processing'}
+                  disabled={status === "processing"}
                   size="sm"
                 >
                   <Plus className="h-3 w-3" />
-                  {status === 'processing' ? 'Processing...' : 'Add More Files'}
+                  {status === "processing" ? "Processing..." : "Add More Files"}
                 </Button>
 
                 <Button
                   className="flex items-center gap-2 w-full"
                   onClick={handleShare}
                   disabled={
-                    status === 'processing' || selectedFiles.length === 0
+                    status === "processing" || selectedFiles.length === 0
                   }
                 >
-                  {status === 'processing' ? (
+                  {status === "processing" ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Preparing...</span>
                     </>
                   ) : (
-                    'Generate Share Code'
+                    "Generate Share Code"
                   )}
                 </Button>
               </div>
             </div>
           )}
 
-          {status === 'processing' && (
+          {status === "processing" && (
             <div className="space-y-2 mt-4 p-3 border border-border rounded-md bg-muted">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-muted-foreground">
@@ -399,7 +355,7 @@ const FileShare: React.FC = () => {
             </div>
           )}
 
-          {status === 'error' && statusMessage && (
+          {status === "error" && statusMessage && (
             <div className="p-3 rounded-md bg-muted border border-destructive">
               <div className="flex items-center gap-2 text-destructive">
                 <X className="h-4 w-4 shrink-0" />
