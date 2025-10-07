@@ -4,16 +4,16 @@
 )]
 
 // Import modules
+mod android_compat;
 mod events;
 mod sender_state;
-mod sendme; // Replace with the name of the module that contains your functions // New module for event types
-mod android_compat; // Compatibility layer for Android
+mod sendme; // Replace with the name of the module that contains your functions // New module for event types // Compatibility layer for Android
 
 use sender_state::{SenderState, SharedSenderState};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::{State, Window, Emitter};
+use tauri::{Emitter, State, Window};
 
 #[cfg(not(target_os = "android"))]
 use std::time::Instant;
@@ -51,8 +51,10 @@ fn get_temp_dir() -> std::path::PathBuf {
     #[cfg(target_os = "android")]
     {
         // On Android, use app-specific external files directory
-        let mut path = android_compat::android::get_android_external_files_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files"));
+        let mut path =
+            android_compat::android::get_android_external_files_dir().unwrap_or_else(|_| {
+                std::path::PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files")
+            });
         path.push(format!("{}temp", DIR_PREFIX));
         path
     }
@@ -135,8 +137,31 @@ async fn receive_file_with_stats(
         // Emit status update
         let _ = window.emit("download_status", "Connecting to sender...");
 
-        // Call the Android-specific implementation
-        let result = android_compat::android::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
+        // Prepare values to move into the blocking task
+        let ticket_clone = ticket.clone();
+        let storage_path_clone = file_storage_path.clone();
+
+        // Call the Android-specific implementation on a blocking thread
+        let join_result = tauri::async_runtime::spawn_blocking(move || {
+            futures::executor::block_on(async move {
+                android_compat::android::receive_file_minimal(
+                    ticket_clone,
+                    storage_path_clone,
+                    verbose,
+                )
+                .await
+            })
+        })
+        .await;
+
+        let result = match join_result {
+            Ok(res) => res,
+            Err(join_err) => {
+                let err_string = join_err.to_string();
+                let _ = window.emit("download_error", err_string.clone());
+                return Err(err_string);
+            }
+        };
 
         // Handle the result
         match result {
@@ -290,16 +315,25 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
 fn get_downloads_dir() -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
+        println!("[get_downloads_dir] Android: Getting downloads directory");
         // On Android, use app-specific Downloads directory
         match android_compat::android::get_android_downloads_dir() {
             Ok(path) => {
+                println!("[get_downloads_dir] Android: Path obtained: {:?}", path);
                 // Create the directory if it doesn't exist
                 if let Err(e) = std::fs::create_dir_all(&path) {
-                    eprintln!("Failed to create downloads directory: {}", e);
+                    eprintln!("[get_downloads_dir] Android: Failed to create downloads directory: {}", e);
+                    return Err(format!("Failed to create downloads directory: {}", e));
                 }
-                Ok(path.to_string_lossy().to_string())
+                println!("[get_downloads_dir] Android: Directory created successfully");
+                let path_string = path.to_string_lossy().to_string();
+                println!("[get_downloads_dir] Android: Returning path: {}", path_string);
+                Ok(path_string)
             }
-            Err(e) => Err(format!("Could not determine downloads directory: {}", e)),
+            Err(e) => {
+                eprintln!("[get_downloads_dir] Android: Error: {}", e);
+                Err(format!("Could not determine downloads directory: {}", e))
+            }
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -315,9 +349,54 @@ fn get_downloads_dir() -> Result<String, String> {
 fn get_file_size(path: String) -> Result<u64, String> {
     let path = Path::new(&path);
     match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.len()),
+        Ok(metadata) => {
+            if metadata.is_dir() {
+                calculate_directory_size(path).map_err(|e| e.to_string())
+            } else {
+                Ok(metadata.len())
+            }
+        }
         Err(e) => Err(format!("Failed to get file size: {}", e)),
     }
+}
+
+fn calculate_directory_size(path: &Path) -> Result<u64, std::io::Error> {
+    let mut total: u64 = 0;
+    let mut stack = Vec::new();
+    stack.push(path.to_path_buf());
+
+    while let Some(current) = stack.pop() {
+        let entries = match fs::read_dir(&current) {
+            Ok(entries) => entries,
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::PermissionDenied {
+                    continue;
+                }
+                return Err(err);
+            }
+        };
+
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(data) => data,
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::PermissionDenied {
+                        continue;
+                    }
+                    return Err(err);
+                }
+            };
+
+            if metadata.is_dir() {
+                stack.push(entry_path);
+            } else {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+
+    Ok(total)
 }
 
 /// Deletes all directories in the current directory whose names start with DIR_PREFIX.

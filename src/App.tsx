@@ -3,21 +3,29 @@ import { useState } from 'react';
 import FileSend from './components/FileSend';
 import FileReceive from './components/FileReceive';
 import { invoke } from '@tauri-apps/api/core';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { ToastProvider } from './components/ui/toast';
 import { Upload, Download } from 'lucide-react';
+import { Button } from './components/ui/button';
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>('send');
 
-  // Function to handle stopping sending when switching tabs
-  const handleTabChange = async (value: string) => {
-    if (activeTab === 'send' && value !== 'send') {
-      await invoke<string>('stop_sharing_command', {
-        verbose: false,
-      });
-    }
+  // Function to handle tab change - simplified to be synchronous
+  const handleTabChange = (value: string) => {
+    console.log('[App] handleTabChange called with:', value);
+    console.log('[App] Current activeTab state:', activeTab);
+
+    // Set tab immediately - don't wait for async
     setActiveTab(value);
+    console.log('[App] setActiveTab called with:', value);
+
+    // Stop sharing in background if switching away from send
+    if (activeTab === 'send' && value !== 'send') {
+      console.log('[App] Calling stop_sharing_command in background');
+      invoke<string>('stop_sharing_command', { verbose: false })
+        .then(() => console.log('[App] Stop sharing succeeded'))
+        .catch((error) => console.error('[App] Stop sharing failed:', error));
+    }
   };
 
   return (
@@ -31,51 +39,65 @@ function App() {
             </h1>
           </header>
 
-          <Tabs
-            defaultValue="send"
-            value={activeTab}
-            onValueChange={handleTabChange}
-            className="flex flex-col flex-grow"
-          >
-            <div className="border-b px-4 py-2">
-              <TabsList className="w-full h-14 bg-background border border-border rounded-xl p-1.5 gap-3">
-                <TabsTrigger
-                  value="send"
-                  className="flex-1 rounded-lg h-full data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm transition-all duration-200"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <Upload className="h-4 w-4" />
-                    <span className="font-medium">Send</span>
-                  </div>
-                </TabsTrigger>
-                <TabsTrigger
-                  value="receive"
-                  className="flex-1 rounded-lg h-full data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm transition-all duration-200"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <Download className="h-4 w-4" />
-                    <span className="font-medium">Receive</span>
-                  </div>
-                </TabsTrigger>
-              </TabsList>
+          {/* Debug info */}
+          <div className="text-xs bg-yellow-100 text-black p-2 text-center font-bold">
+            Active tab: {activeTab} | Tap tabs below to switch
+          </div>
+
+          {/* Simple button-based tabs */}
+          <div className="border-b px-4 py-2">
+            <div className="w-full h-14 bg-background border border-border rounded-xl p-1.5 gap-3 flex">
+              <Button
+                onClick={() => {
+                  console.log('[App] Send button clicked');
+                  handleTabChange('send');
+                }}
+                className={`flex-1 rounded-lg h-full transition-all duration-200 ${
+                  activeTab === 'send'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-transparent text-foreground hover:bg-muted'
+                }`}
+                variant={activeTab === 'send' ? 'default' : 'ghost'}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <Upload className="h-4 w-4" />
+                  <span className="font-medium">Send</span>
+                </div>
+              </Button>
+              <Button
+                onClick={() => {
+                  console.log('[App] Receive button clicked');
+                  handleTabChange('receive');
+                }}
+                className={`flex-1 rounded-lg h-full transition-all duration-200 ${
+                  activeTab === 'receive'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-transparent text-foreground hover:bg-muted'
+                }`}
+                variant={activeTab === 'receive' ? 'default' : 'ghost'}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <Download className="h-4 w-4" />
+                  <span className="font-medium">Receive</span>
+                </div>
+              </Button>
+            </div>
+          </div>
+
+          {/* Tab content */}
+          <main className="flex-grow overflow-auto">
+            {/* Debug: show both tabs visibility */}
+            <div className="text-xs bg-blue-100 text-black p-2 text-center">
+              Send visible: {activeTab === 'send' ? 'YES' : 'NO'} | Receive visible: {activeTab === 'receive' ? 'YES' : 'NO'}
             </div>
 
-            <main className="flex-grow overflow-auto">
-              <TabsContent
-                value="send"
-                className="h-full p-4 m-0 overflow-auto data-[state=active]:block"
-              >
-                <FileSend />
-              </TabsContent>
-
-              <TabsContent
-                value="receive"
-                className="h-full p-4 m-0 overflow-auto data-[state=active]:block"
-              >
-                <FileReceive />
-              </TabsContent>
-            </main>
-          </Tabs>
+            <div className={`h-full p-4 ${activeTab === 'send' ? 'block' : 'hidden'}`}>
+              <FileSend />
+            </div>
+            <div className={`h-full p-4 ${activeTab === 'receive' ? 'block' : 'hidden'}`}>
+              <FileReceive />
+            </div>
+          </main>
 
           <footer className="mt-auto text-center text-xs text-muted-foreground py-3 border-t">
             <p>Secure File Transfer • Send files safely</p>
