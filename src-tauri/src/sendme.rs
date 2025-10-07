@@ -663,8 +663,15 @@ struct GetBlobResponse {
 pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
     let client = Client::new();
     let payload = BlobRequest { blobs: vec![blob] };
+
+    // Get BASE_URL with fallback to production URL
+    let base_url = std::env::var("BASE_URL")
+        .unwrap_or_else(|_| "https://send.hindalert.com".to_string());
+
+    println!("create_blob: Using BASE_URL: {}", base_url);
+
     let response = client
-        .post(&format!("{}/api/code/", std::env::var("BASE_URL").unwrap()))
+        .post(&format!("{}/api/code/", base_url))
         .json(&payload)
         .send()
         .await?
@@ -676,7 +683,14 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
 
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     let client = Client::new();
-    let url: String = format!("{}/api/code/{}", std::env::var("BASE_URL").unwrap(), code);
+
+    // Get BASE_URL with fallback to production URL
+    let base_url = std::env::var("BASE_URL")
+        .unwrap_or_else(|_| "https://send.hindalert.com".to_string());
+
+    println!("get_blob: Using BASE_URL: {}", base_url);
+
+    let url: String = format!("{}/api/code/{}", base_url, code);
 
     let response = client
         .get(&url)
@@ -790,7 +804,7 @@ fn show_get_error(e: anyhow::Error) -> anyhow::Error {
     e
 }
 
-async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result<()> {
+pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result<()> {
     let ticket = args.ticket;
     let addr = ticket.node_addr().clone();
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
@@ -880,7 +894,9 @@ async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result
 pub async fn start_send(
     args: SendArgs,
 ) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
+    println!("[start_send] Step 1: Getting secret key");
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
+    println!("[start_send] Step 2: Building endpoint");
     let mut builder = Endpoint::builder()
         .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
         .secret_key(secret_key)
@@ -897,6 +913,7 @@ pub async fn start_send(
     }
 
     // Create a unique directory for this sending session.
+    println!("[start_send] Step 3: Creating blobs data directory");
     let suffix = rand::thread_rng().gen::<[u8; 16]>();
     let blobs_data_dir = CWD.join(format!("{}send-{}", DIR_PREFIX, HEXLOWER.encode(&suffix)));
     if blobs_data_dir.exists() {
@@ -907,29 +924,39 @@ pub async fn start_send(
         std::process::exit(1);
     }
     tokio::fs::create_dir_all(&blobs_data_dir).await?;
+    println!("[start_send] Step 4: Blobs directory created: {:?}", blobs_data_dir);
 
+    println!("[start_send] Step 5: Binding endpoint");
     let endpoint = builder.bind().await?;
+    println!("[start_send] Step 6: Creating blobs store");
     let ps = SendStatus::new();
     let blobs = Blobs::persistent(&blobs_data_dir)
         .await?
         .events(ps.new_client().into())
         .build(&endpoint);
 
+    println!("[start_send] Step 7: Building router");
     let router = iroh::protocol::Router::builder(endpoint)
         .accept(iroh_blobs::ALPN, blobs.clone())
         .spawn()
         .await?;
 
+    println!("[start_send] Step 8: Importing file: {:?}", args.path);
     let path = args.path;
     let (temp_tag, size, collection) = import(path.clone(), blobs.store().clone()).await?;
+    println!("[start_send] Step 9: Import complete, size: {}", size);
     let hash = *temp_tag.hash();
 
     // Wait for the endpoint to be ready.
+    println!("[start_send] Step 10: Waiting for relay initialization");
     let _ = router.endpoint().home_relay().initialized().await?;
+    println!("[start_send] Step 11: Relay initialized");
 
+    println!("[start_send] Step 12: Getting node address");
     let mut addr = router.endpoint().node_addr().await?;
     apply_options(&mut addr, args.ticket_type);
     let ticket = BlobTicket::new(addr, hash, BlobFormat::HashSeq)?;
+    println!("[start_send] Step 13: Ticket created successfully");
 
     let entry_type = if path.is_file() { "file" } else { "directory" };
     println!(
