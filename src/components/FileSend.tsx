@@ -1,11 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { resolveFileEntries } from "@/utils/fileSelection";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
-import { logger } from "@/utils/logger";
 import { API_CONFIG, UI_CONFIG } from "@/config/app.config";
+import { resolveFileEntries } from "@/utils/fileSelection";
+import { logger } from "@/utils/logger";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
+  Activity,
   CheckCircle,
   Copy,
   File,
@@ -23,19 +25,93 @@ interface FileInfo {
   path: string;
 }
 
+interface TransferProgressEvent {
+  bytes_transferred: number;
+  total_bytes: number;
+  percentage: number;
+  speed_bytes_per_sec: number;
+  elapsed_ms: number;
+  eta_ms: number;
+}
+
+interface SendCompletedEvent {
+  success: boolean;
+  message: string;
+  elapsed_time_ms: number;
+  total_bytes: number;
+  files_count: number;
+}
+
 const FileSend: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
   const [status, setStatus] = useState<
-    "idle" | "processing" | "success" | "error"
+    "idle" | "processing" | "success" | "error" | "sharing"
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [sendCode, setSendCode] = useState<string>("");
   const [isAndroid, setIsAndroid] = useState(false);
+  const [importProgress, setImportProgress] = useState<number>(0);
+
+  // Live sharing stats when someone is downloading
+  const [sharingStats, setSharingStats] = useState<{
+    bytesTransferred: string;
+    totalBytes: string;
+    speed: string;
+    activeConnections: number;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof navigator !== "undefined") {
       setIsAndroid(/android/i.test(navigator.userAgent));
     }
+
+    // Set up event listeners for send/upload events
+    const setupSendListeners = async () => {
+      const unlisteners: (() => void)[] = [];
+
+      // Listen for import progress during file preparation
+      unlisteners.push(
+        await listen<{ percentage: number }>("import_progress", (event) => {
+          setImportProgress(event.payload.percentage);
+        })
+      );
+
+      // Listen for send completion
+      unlisteners.push(
+        await listen<SendCompletedEvent>("send_completed", (_event) => {
+          logger.info("FileSend", "Files prepared successfully");
+        })
+      );
+
+      // Listen for transfer progress when someone is downloading
+      unlisteners.push(
+        await listen<TransferProgressEvent>(
+          "send_transfer_progress",
+          (event) => {
+            const { bytes_transferred, total_bytes, speed_bytes_per_sec } =
+              event.payload;
+
+            setStatus("sharing");
+            setSharingStats({
+              bytesTransferred: formatFileSize(bytes_transferred),
+              totalBytes: formatFileSize(total_bytes),
+              speed: formatFileSize(speed_bytes_per_sec) + "/s",
+              activeConnections: 1,
+            });
+          }
+        )
+      );
+
+      return () => {
+        unlisteners.forEach((unlisten) => unlisten());
+      };
+    };
+
+    const cleanupPromise = setupSendListeners();
+
+    return () => {
+      cleanupPromise.then((cleanup) => cleanup());
+    };
   }, []);
 
   // Format file size for display
@@ -190,9 +266,15 @@ const FileSend: React.FC = () => {
         <div className="space-y-6">
           <div className="flex flex-col items-center justify-center">
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <CheckCircle className="h-8 w-8 text-primary" />
+              {status === "sharing" ? (
+                <Activity className="h-8 w-8 text-primary animate-pulse" />
+              ) : (
+                <CheckCircle className="h-8 w-8 text-primary" />
+              )}
             </div>
-            <h2 className="text-xl font-bold text-center">Your Send Code</h2>
+            <h2 className="text-xl font-bold text-center">
+              {status === "sharing" ? "Sharing in Progress" : "Your Send Code"}
+            </h2>
 
             <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
               {sendCode.split("").map((char, index) => (
@@ -206,9 +288,31 @@ const FileSend: React.FC = () => {
             </div>
 
             <p className="text-muted-foreground text-sm text-center px-4">
-              Send this code to the recipient to let them download your files
+              {status === "sharing"
+                ? "Someone is downloading your files..."
+                : "Send this code to the recipient to let them download your files"}
             </p>
           </div>
+
+          {status === "sharing" && sharingStats && (
+            <div className="mx-2 p-4 border border-primary rounded-lg bg-muted space-y-2">
+              <h3 className="text-sm font-medium text-primary">
+                Live Transfer Stats
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="text-muted-foreground">Progress</div>
+                  <div className="font-medium">
+                    {sharingStats.bytesTransferred} / {sharingStats.totalBytes}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Speed</div>
+                  <div className="font-medium">{sharingStats.speed}</div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-3 px-2">
             <Button
@@ -338,9 +442,11 @@ const FileSend: React.FC = () => {
                 <span className="text-muted-foreground">
                   Preparing files...
                 </span>
-                <span className="font-medium">30%</span>
+                <span className="font-medium text-primary">
+                  {Math.round(importProgress)}%
+                </span>
               </div>
-              <Progress value={30} className="h-2" />
+              <Progress value={importProgress} className="h-2" />
               <p className="text-xs text-center text-muted-foreground">
                 {statusMessage}
               </p>

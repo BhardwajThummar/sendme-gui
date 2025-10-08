@@ -1,7 +1,5 @@
 //! Command line arguments.
 
-use crate::config::config;
-use crate::logger::{debug, error, info, warn};
 use std::{
     collections::BTreeMap,
     fmt::{Display, Formatter},
@@ -9,8 +7,9 @@ use std::{
     path::{Component, Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use console::style;
@@ -39,7 +38,13 @@ use iroh_blobs::{
 use n0_future::{future::Boxed, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use walkdir::WalkDir;
+
+use crate::{
+    config::config,
+    logger::{debug, error, info, warn},
+};
 
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = get_home_dir();
@@ -642,8 +647,9 @@ fn make_download_progress() -> ProgressBar {
 }
 
 // use serde::{Deserialize, Serialize};
-use reqwest::Client;
 use std::error::Error;
+
+use reqwest::Client;
 
 #[derive(Serialize)]
 struct BlobRequest {
@@ -823,7 +829,11 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
         builder = builder.bind_addr_v6(addr);
     }
     let endpoint = builder.bind().await?;
-    let dir_name = format!("{}get-{}", cfg.storage.temp_dir_prefix, ticket.hash().to_hex());
+    let dir_name = format!(
+        "{}get-{}",
+        cfg.storage.temp_dir_prefix,
+        ticket.hash().to_hex()
+    );
     let iroh_data_dir = CWD.join(dir_name);
     let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
     let mp = MultiProgress::new();
@@ -919,11 +929,21 @@ pub async fn start_send(
     // Create a unique directory for this sending session.
     debug!("Creating blobs data directory");
     let suffix = rand::thread_rng().gen::<[u8; 16]>();
-    let blobs_data_dir = CWD.join(format!("{}send-{}", cfg.storage.temp_dir_prefix, HEXLOWER.encode(&suffix)));
+    let blobs_data_dir = CWD.join(format!(
+        "{}send-{}",
+        cfg.storage.temp_dir_prefix,
+        HEXLOWER.encode(&suffix)
+    ));
 
     if blobs_data_dir.exists() {
-        error!("Cannot share twice from the same directory: {}", CWD.display());
-        anyhow::bail!("Cannot share twice from the same directory: {}", CWD.display());
+        error!(
+            "Cannot share twice from the same directory: {}",
+            CWD.display()
+        );
+        anyhow::bail!(
+            "Cannot share twice from the same directory: {}",
+            CWD.display()
+        );
     }
 
     tokio::fs::create_dir_all(&blobs_data_dir).await?;
@@ -984,6 +1004,7 @@ pub async fn start_send(
 }
 
 use tauri::State;
+
 // SharedSenderState SenderState from src/sender_state.rs
 use crate::sender_state::SharedSenderState;
 
@@ -1039,8 +1060,9 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
         debug!("Shutting down router");
         tokio::time::timeout(
             Duration::from_secs(cfg.network.router_shutdown_timeout_secs),
-            router.shutdown()
-        ).await??;
+            router.shutdown(),
+        )
+        .await??;
         info!("Router shutdown complete");
     }
 
@@ -1090,4 +1112,178 @@ pub async fn receive_file_minimal(
         Ok(()) => Ok("success".to_string()),
         Err(e) => Err(e),
     }
+}
+
+pub async fn receive_file_with_progress(
+    ticket: String,
+    file_storage_path: String,
+    verbose: bool,
+    window: tauri::Window,
+) -> anyhow::Result<String> {
+    debug!("Receiving file from ticket: {}", ticket);
+
+    let blob = match get_blob(ticket).await {
+        Ok(blob) => blob,
+        Err(err) => {
+            error!("Failed to get blob: {}", err);
+            return Err(anyhow::anyhow!("Failed to get blob: {}", err));
+        }
+    };
+
+    let ticket = BlobTicket::from_str(&blob[0])?;
+    let addr = ticket.node_addr().clone();
+
+    info!("Starting file receive from node: {}", addr.node_id);
+    let _ = window.emit("download_status", "Initializing connection...");
+
+    let secret_key = get_or_create_secret(verbose)?;
+    let mut builder = Endpoint::builder()
+        .alpns(vec![])
+        .secret_key(secret_key)
+        .relay_mode(RelayModeOption::Default.into());
+
+    if ticket.node_addr().relay_url.is_none() && ticket.node_addr().direct_addresses.is_empty() {
+        builder = builder.add_discovery(|_| Some(DnsDiscovery::n0_dns()));
+    }
+
+    let endpoint = builder.bind().await?;
+    let cfg = config();
+    let dir_name = format!(
+        "{}get-{}",
+        cfg.storage.temp_dir_prefix,
+        ticket.hash().to_hex()
+    );
+    let iroh_data_dir = CWD.join(dir_name);
+    let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
+
+    let _ = window.emit("download_status", "Connecting to sender...");
+    let connection = endpoint.connect(addr, iroh_blobs::protocol::ALPN).await?;
+    let hash_and_format = HashAndFormat {
+        hash: ticket.hash(),
+        format: ticket.format(),
+    };
+
+    let (send, recv) = async_channel::bounded(32);
+    let progress = iroh_blobs::util::progress::AsyncChannelProgressSender::new(send);
+    let (_hash_seq, sizes) =
+        get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32)
+            .await
+            .map_err(show_get_error)?;
+
+    let total_size = sizes.iter().sum::<u64>();
+    let total_files = sizes.len().saturating_sub(1);
+    let payload_size = sizes.iter().skip(1).sum::<u64>();
+
+    info!(
+        "Getting collection {} {} files, {}",
+        print_hash(&ticket.hash(), Format::Hex),
+        total_files,
+        HumanBytes(payload_size)
+    );
+
+    let _ = window.emit(
+        "download_status",
+        format!("Downloading {} files...", total_files),
+    );
+
+    // Spawn task to monitor progress and emit events
+    let window_clone = window.clone();
+    let start_time = Instant::now();
+    let _task = tokio::spawn(async move {
+        let mut total_done = 0u64;
+        let mut sizes_map = BTreeMap::new();
+        let mut last_update = Instant::now();
+
+        loop {
+            let x = recv.recv().await;
+            match x {
+                Ok(DownloadProgress::Connected) => {
+                    let _ = window_clone.emit("download_status", "Connected, requesting data...");
+                }
+                Ok(DownloadProgress::FoundHashSeq { .. }) => {
+                    let _ = window_clone.emit("download_status", "Downloading...");
+                }
+                Ok(DownloadProgress::Found { id, size, .. }) => {
+                    sizes_map.insert(id, size);
+                }
+                Ok(DownloadProgress::Progress { offset, .. }) => {
+                    let current_bytes = total_done + offset;
+                    let elapsed = start_time.elapsed();
+                    let elapsed_ms = elapsed.as_millis() as u64;
+
+                    // Update every 100ms to avoid too many events
+                    if last_update.elapsed().as_millis() > 100 {
+                        let percentage = (current_bytes as f64 / total_size as f64) * 100.0;
+                        let speed = if elapsed.as_secs_f64() > 0.0 {
+                            (current_bytes as f64 / elapsed.as_secs_f64()) as u64
+                        } else {
+                            0
+                        };
+
+                        let eta_ms = if speed > 0 {
+                            let remaining_bytes = total_size.saturating_sub(current_bytes);
+                            ((remaining_bytes as f64 / speed as f64) * 1000.0) as u64
+                        } else {
+                            0
+                        };
+
+                        let _ = window_clone.emit(
+                            "transfer_progress",
+                            crate::events::TransferProgressEvent {
+                                bytes_transferred: current_bytes,
+                                total_bytes: total_size,
+                                percentage,
+                                speed_bytes_per_sec: speed,
+                                elapsed_ms,
+                                eta_ms,
+                            },
+                        );
+
+                        last_update = Instant::now();
+                    }
+                }
+                Ok(DownloadProgress::Done { id }) => {
+                    total_done += sizes_map.remove(&id).unwrap_or_default();
+                }
+                Ok(DownloadProgress::AllDone(_stats)) => {
+                    break;
+                }
+                Ok(DownloadProgress::Abort(e)) => {
+                    let _ =
+                        window_clone.emit("download_error", format!("Download aborted: {:?}", e));
+                    break;
+                }
+                Err(_) => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let get_conn = || async move { Ok(connection) };
+    let stats = iroh_blobs::get::db::get_to_db(&db, get_conn, &hash_and_format, progress)
+        .await
+        .map_err(|e| show_get_error(anyhow::anyhow!(e)))?;
+
+    let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
+
+    if let Some((name, _)) = collection.iter().next() {
+        if let Some(first) = name.split('/').next() {
+            info!("Downloading to: {}", first);
+        }
+    }
+
+    export(db, collection, file_storage_path).await?;
+    tokio::fs::remove_dir_all(iroh_data_dir).await?;
+
+    info!(
+        "Downloaded {} files, {}. Took {} ({}/s)",
+        total_files,
+        HumanBytes(payload_size),
+        HumanDuration(stats.elapsed),
+        HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64),
+    );
+
+    Ok("success".to_string())
 }

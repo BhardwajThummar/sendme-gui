@@ -4,11 +4,14 @@
 
 #[cfg(target_os = "android")]
 pub mod android {
-    use crate::config::config;
-    use crate::logger::{debug, error, info, warn};
+    use std::{path::PathBuf, sync::Mutex};
+
     use lazy_static::lazy_static;
-    use std::path::PathBuf;
-    use std::sync::Mutex;
+
+    use crate::{
+        config::config,
+        logger::{debug, error, info, warn},
+    };
 
     // Global state to keep router alive on Android
     lazy_static! {
@@ -68,10 +71,11 @@ pub mod android {
     pub async fn send_file_minimal(file_path: String, verbose: bool) -> Result<String, String> {
         let cfg = config();
         // Import necessary types
+        use std::path::PathBuf;
+
         use crate::sendme::{
             create_blob, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
         };
-        use std::path::PathBuf;
 
         info!("Android: Starting send_file_minimal for: {}", file_path);
 
@@ -88,12 +92,11 @@ pub mod android {
         };
 
         debug!("Android: Calling start_send");
-        let (ticket, router, _blobs_data_dir) =
-            start_send(send_args).await.map_err(|e| {
-                let err_msg = format!("start_send failed: {}", e);
-                error!("Android: {}", err_msg);
-                err_msg
-            })?;
+        let (ticket, router, _blobs_data_dir) = start_send(send_args).await.map_err(|e| {
+            let err_msg = format!("start_send failed: {}", e);
+            error!("Android: {}", err_msg);
+            err_msg
+        })?;
 
         info!("Android: Ticket generated successfully");
         let blob = ticket.to_string();
@@ -117,24 +120,28 @@ pub mod android {
         use std::time::Duration;
         let result = tokio::time::timeout(
             Duration::from_secs(cfg.network.http_timeout_secs),
-            create_blob(blob)
-        ).await;
+            create_blob(blob),
+        )
+        .await;
 
         match result {
             Ok(Ok(code)) => {
                 info!("Android: Blob created successfully with code: {}", code);
                 Ok(code)
-            },
+            }
             Ok(Err(err)) => {
                 let err_msg = format!("Failed to create blob: {}", err);
                 error!("Android: {}", err_msg);
                 Err(err_msg)
-            },
+            }
             Err(_) => {
-                let err_msg = format!("Timeout: create_blob took longer than {} seconds", cfg.network.http_timeout_secs);
+                let err_msg = format!(
+                    "Timeout: create_blob took longer than {} seconds",
+                    cfg.network.http_timeout_secs
+                );
                 error!("Android: {}", err_msg);
                 Err(err_msg)
-            },
+            }
         }
     }
 
@@ -144,12 +151,11 @@ pub mod android {
         verbose: bool,
     ) -> Result<String, String> {
         let cfg = config();
-        use crate::sendme::{
-            get_blob, receive, CommonArgs, Format, ReceiveArgs, RelayModeOption,
-        };
+        use std::{str::FromStr, time::Duration};
+
         use iroh_blobs::ticket::BlobTicket;
-        use std::str::FromStr;
-        use std::time::Duration;
+
+        use crate::sendme::{get_blob, receive, CommonArgs, Format, ReceiveArgs, RelayModeOption};
 
         info!("Android: Starting receive_file_minimal");
         debug!("Android: Ticket code: {}", ticket);
@@ -159,21 +165,25 @@ pub mod android {
         info!("Android: Fetching blob from API");
         let blob_result = tokio::time::timeout(
             Duration::from_secs(cfg.network.http_timeout_secs),
-            get_blob(ticket)
-        ).await;
+            get_blob(ticket),
+        )
+        .await;
 
         let blob = match blob_result {
             Ok(Ok(blob)) => {
                 info!("Android: Successfully fetched blob from API");
                 blob
-            },
+            }
             Ok(Err(err)) => {
                 let err_msg = format!("Failed to get blob from API: {}", err);
                 error!("Android: {}", err_msg);
                 return Err(err_msg);
-            },
+            }
             Err(_) => {
-                let err_msg = format!("Timeout: get_blob took longer than {} seconds", cfg.network.http_timeout_secs);
+                let err_msg = format!(
+                    "Timeout: get_blob took longer than {} seconds",
+                    cfg.network.http_timeout_secs
+                );
                 error!("Android: {}", err_msg);
                 return Err(err_msg);
             }
@@ -213,7 +223,7 @@ pub mod android {
             Ok(_) => {
                 info!("Android: File received successfully");
                 Ok("success".to_string())
-            },
+            }
             Err(e) => {
                 let err_msg = format!("Failed to receive file: {}", e);
                 error!("Android: {}", err_msg);
@@ -242,11 +252,11 @@ pub mod android {
             debug!("Android: Shutting down router");
             tokio::time::timeout(
                 Duration::from_secs(cfg.network.router_shutdown_timeout_secs),
-                router.shutdown()
+                router.shutdown(),
             )
-                .await
-                .map_err(|_| "Timeout shutting down router".to_string())?
-                .map_err(|e| format!("Failed to shutdown router: {}", e))?;
+            .await
+            .map_err(|_| "Timeout shutting down router".to_string())?
+            .map_err(|e| format!("Failed to shutdown router: {}", e))?;
             info!("Android: Router shutdown complete");
         }
 
