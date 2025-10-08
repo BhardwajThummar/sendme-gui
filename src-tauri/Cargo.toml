@@ -55,4 +55,15 @@ dotenv = "0.15.0"
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
 
+[profile.dev]
+# Disable debug assertions in dev mode for cleaner logs
+debug-assertions = false
+
+[profile.release]
+# Optimize for size and speed
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+
 [target.'cfg(target_os = "android")'.dependencies]
