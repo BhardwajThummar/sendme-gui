@@ -1,4 +1,3 @@
-// src/App.tsx
 import { useState } from 'react';
 import FileSend from './components/FileSend';
 import FileReceive from './components/FileReceive';
@@ -6,25 +5,21 @@ import { invoke } from '@tauri-apps/api/core';
 import { ToastProvider } from './components/ui/toast';
 import { Upload, Download } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { logger } from './utils/logger';
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>('send');
 
-  // Function to handle tab change - simplified to be synchronous
   const handleTabChange = (value: string) => {
-    console.log('[App] handleTabChange called with:', value);
-    console.log('[App] Current activeTab state:', activeTab);
+    logger.debug('App', `Tab change requested: ${activeTab} → ${value}`);
 
-    // Set tab immediately - don't wait for async
     setActiveTab(value);
-    console.log('[App] setActiveTab called with:', value);
 
     // Stop sharing in background if switching away from send
     if (activeTab === 'send' && value !== 'send') {
-      console.log('[App] Calling stop_sharing_command in background');
       invoke<string>('stop_sharing_command', { verbose: false })
-        .then(() => console.log('[App] Stop sharing succeeded'))
-        .catch((error) => console.error('[App] Stop sharing failed:', error));
+        .then(() => logger.info('App', 'File sharing stopped'))
+        .catch((error) => logger.error('App', 'Failed to stop sharing', error));
     }
   };
 
@@ -39,19 +34,10 @@ function App() {
             </h1>
           </header>
 
-          {/* Debug info */}
-          <div className="text-xs bg-yellow-100 text-black p-2 text-center font-bold">
-            Active tab: {activeTab} | Tap tabs below to switch
-          </div>
-
-          {/* Simple button-based tabs */}
           <div className="border-b px-4 py-2">
             <div className="w-full h-14 bg-background border border-border rounded-xl p-1.5 gap-3 flex">
               <Button
-                onClick={() => {
-                  console.log('[App] Send button clicked');
-                  handleTabChange('send');
-                }}
+                onClick={() => handleTabChange('send')}
                 className={`flex-1 rounded-lg h-full transition-all duration-200 ${
                   activeTab === 'send'
                     ? 'bg-primary text-primary-foreground shadow-sm'
@@ -65,10 +51,7 @@ function App() {
                 </div>
               </Button>
               <Button
-                onClick={() => {
-                  console.log('[App] Receive button clicked');
-                  handleTabChange('receive');
-                }}
+                onClick={() => handleTabChange('receive')}
                 className={`flex-1 rounded-lg h-full transition-all duration-200 ${
                   activeTab === 'receive'
                     ? 'bg-primary text-primary-foreground shadow-sm'
@@ -84,13 +67,7 @@ function App() {
             </div>
           </div>
 
-          {/* Tab content */}
           <main className="flex-grow overflow-auto">
-            {/* Debug: show both tabs visibility */}
-            <div className="text-xs bg-blue-100 text-black p-2 text-center">
-              Send visible: {activeTab === 'send' ? 'YES' : 'NO'} | Receive visible: {activeTab === 'receive' ? 'YES' : 'NO'}
-            </div>
-
             <div className={`h-full p-4 ${activeTab === 'send' ? 'block' : 'hidden'}`}>
               <FileSend />
             </div>
