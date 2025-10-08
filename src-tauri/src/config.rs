@@ -126,10 +126,7 @@ impl Default for StorageConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
-            router_shutdown_timeout_secs: env_or_default_parsed(
-                "ROUTER_SHUTDOWN_TIMEOUT_SECS",
-                5,
-            ),
+            router_shutdown_timeout_secs: env_or_default_parsed("ROUTER_SHUTDOWN_TIMEOUT_SECS", 5),
             http_timeout_secs: env_or_default_parsed("HTTP_TIMEOUT_SECS", 30),
         }
     }
@@ -169,7 +166,9 @@ impl AppConfig {
 
     /// Get the global configuration instance
     pub fn get() -> &'static AppConfig {
-        CONFIG.get().expect("Config not initialized. Call AppConfig::init() first")
+        CONFIG
+            .get()
+            .expect("Config not initialized. Call AppConfig::init() first")
     }
 }
 

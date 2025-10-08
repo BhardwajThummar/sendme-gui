@@ -13,6 +13,27 @@ pub struct DownloadCompletedEvent {
     pub files_count: u32,
 }
 
+// Event for download/upload progress updates
+#[derive(Clone, Serialize)]
+pub struct TransferProgressEvent {
+    pub bytes_transferred: u64,
+    pub total_bytes: u64,
+    pub percentage: f64,
+    pub speed_bytes_per_sec: u64,
+    pub elapsed_ms: u64,
+    pub eta_ms: u64,
+}
+
+// Event for send/upload statistics
+#[derive(Clone, Serialize)]
+pub struct SendCompletedEvent {
+    pub success: bool,
+    pub message: String,
+    pub elapsed_time_ms: u64,
+    pub total_bytes: u64,
+    pub files_count: u32,
+}
+
 // // Helper function to format file size in human-readable format
 // pub fn format_size(size: u64) -> String {
 //     const KB: u64 = 1024;
