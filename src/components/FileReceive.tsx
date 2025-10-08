@@ -1,22 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
-import { getDownloadsFolderPath, saveDownloadPath } from '../utils/paths';
-import { listen } from '@tauri-apps/api/event';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Input } from '@/components/ui/input';
-import { logger } from '@/utils/logger';
-import { PLATFORM_CONFIG, FILE_TRANSFER_CONFIG, UI_CONFIG, API_CONFIG } from '@/config/app.config';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
-  Download,
-  FolderOpen,
+  API_CONFIG,
+  FILE_TRANSFER_CONFIG,
+  PLATFORM_CONFIG,
+  UI_CONFIG,
+} from "@/config/app.config";
+import { logger } from "@/utils/logger";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
+import {
   CheckCircle,
-  RefreshCw,
-  Loader2,
+  Download,
   FileDown,
+  FolderOpen,
+  Loader2,
+  RefreshCw,
   X,
-} from 'lucide-react';
+} from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { getDownloadsFolderPath, saveDownloadPath } from "../utils/paths";
 
 // Define types for download events
 interface DownloadCompletedEvent {
@@ -29,15 +34,26 @@ interface DownloadCompletedEvent {
   files_count: number;
 }
 
+interface TransferProgressEvent {
+  bytes_transferred: number;
+  total_bytes: number;
+  percentage: number;
+  speed_bytes_per_sec: number;
+  elapsed_ms: number;
+  eta_ms: number;
+}
+
 const FileReceive: React.FC = () => {
-  const [code, setCode] = useState<string[]>(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(''));
-  const [downloadPath, setDownloadPath] = useState<string>('');
+  const [code, setCode] = useState<string[]>(
+    Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill("")
+  );
+  const [downloadPath, setDownloadPath] = useState<string>("");
   const [status, setStatus] = useState<
-    'idle' | 'processing' | 'success' | 'error'
-  >('idle');
-  const [statusMessage, setStatusMessage] = useState<string>('');
+    "idle" | "processing" | "success" | "error"
+  >("idle");
+  const [statusMessage, setStatusMessage] = useState<string>("");
   const [progress, setProgress] = useState<number>(0);
-  const [fileName, setFileName] = useState<string>('');
+  const [fileName, setFileName] = useState<string>("");
   const [downloadComplete, setDownloadComplete] = useState<boolean>(false);
   const [downloadStats, setDownloadStats] = useState<{
     totalFiles: number;
@@ -45,21 +61,36 @@ const FileReceive: React.FC = () => {
     elapsedTime: string;
     speed: string;
   } | null>(null);
-  const [isAndroid, setIsAndroid] = useState(false);
+  const [_isAndroid, setIsAndroid] = useState(false);
+
+  // Live transfer stats
+  const [liveStats, setLiveStats] = useState<{
+    bytesTransferred: string;
+    totalBytes: string;
+    speed: string;
+    eta: string;
+  } | null>(null);
 
   // Create refs for each input field
-  const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(null));
+  const inputRefs = useRef<(HTMLInputElement | null)[]>(
+    Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(null)
+  );
 
   // Initialize download path and set up event listeners
   useEffect(() => {
-    const isAndroidPlatform = typeof navigator !== 'undefined' && PLATFORM_CONFIG.ANDROID_USER_AGENT_PATTERN.test(navigator.userAgent);
+    const isAndroidPlatform =
+      typeof navigator !== "undefined" &&
+      PLATFORM_CONFIG.ANDROID_USER_AGENT_PATTERN.test(navigator.userAgent);
 
     setIsAndroid(isAndroidPlatform);
 
     // On Android, immediately set the default path to system Downloads
     if (isAndroidPlatform) {
       setDownloadPath(PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH);
-      logger.info('FileReceive', `Android platform detected, using path: ${PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH}`);
+      logger.info(
+        "FileReceive",
+        `Android platform detected, using path: ${PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH}`
+      );
     }
 
     const initPath = async () => {
@@ -71,14 +102,18 @@ const FileReceive: React.FC = () => {
         let path = await getDownloadsFolderPath();
 
         if (!path) {
-          path = await invoke<string>('get_downloads_dir');
+          path = await invoke<string>("get_downloads_dir");
         }
 
-        setDownloadPath(path || '');
-        logger.info('FileReceive', `Download path initialized: ${path}`);
+        setDownloadPath(path || "");
+        logger.info("FileReceive", `Download path initialized: ${path}`);
       } catch (error) {
-        logger.error('FileReceive', 'Failed to initialize download path', error);
-        setDownloadPath('');
+        logger.error(
+          "FileReceive",
+          "Failed to initialize download path",
+          error
+        );
+        setDownloadPath("");
       }
     };
 
@@ -97,48 +132,59 @@ const FileReceive: React.FC = () => {
 
       // Listen for download start
       unlisteners.push(
-        await listen('download_started', () => {
-          logger.info('FileReceive', 'Download started');
-          setStatus('processing');
-          setStatusMessage('Starting download...');
-
-          // Set up a simple progress animation since we can't get actual progress
-          let progressValue = 0;
-          const interval = setInterval(() => {
-            progressValue += 5;
-
-            if (progressValue > FILE_TRANSFER_CONFIG.PROGRESS_MAX_SIMULATED) {
-              clearInterval(interval);
-              return;
-            }
-
-            setProgress(progressValue);
-          }, FILE_TRANSFER_CONFIG.PROGRESS_INTERVAL_MS);
-
-          return () => clearInterval(interval);
+        await listen("download_started", () => {
+          logger.info("FileReceive", "Download started");
+          setStatus("processing");
+          setStatusMessage("Starting download...");
+          setProgress(0);
+          setLiveStats(null);
         })
       );
 
       // Listen for status updates
       unlisteners.push(
-        await listen<string>('download_status', (event) => {
-          logger.debug('FileReceive', `Status update: ${event.payload}`);
+        await listen<string>("download_status", (event) => {
+          logger.debug("FileReceive", `Status update: ${event.payload}`);
           setStatusMessage(event.payload);
+        })
+      );
+
+      // Listen for live transfer progress
+      unlisteners.push(
+        await listen<TransferProgressEvent>("transfer_progress", (event) => {
+          const {
+            bytes_transferred,
+            total_bytes,
+            percentage,
+            speed_bytes_per_sec,
+            eta_ms,
+          } = event.payload;
+
+          setProgress(percentage);
+          setLiveStats({
+            bytesTransferred: formatBytes(bytes_transferred),
+            totalBytes: formatBytes(total_bytes),
+            speed: formatBytes(speed_bytes_per_sec) + "/s",
+            eta: formatTime(eta_ms),
+          });
         })
       );
 
       // Listen for download completion
       unlisteners.push(
-        await listen<DownloadCompletedEvent>('download_completed', (event) => {
+        await listen<DownloadCompletedEvent>("download_completed", (event) => {
           const { filename, total_bytes, files_count, elapsed_time_ms } =
             event.payload;
 
-          logger.info('FileReceive', `Download completed: ${filename} (${formatBytes(total_bytes)})`);
+          logger.info(
+            "FileReceive",
+            `Download completed: ${filename} (${formatBytes(total_bytes)})`
+          );
 
           setFileName(filename);
           setProgress(100);
-          setStatus('success');
-          setStatusMessage('Download complete!');
+          setStatus("success");
+          setStatusMessage("Download complete!");
           setDownloadComplete(true);
 
           setDownloadStats({
@@ -147,16 +193,16 @@ const FileReceive: React.FC = () => {
             elapsedTime: formatTime(elapsed_time_ms),
             speed:
               formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) +
-              '/s',
+              "/s",
           });
         })
       );
 
       // Listen for download errors
       unlisteners.push(
-        await listen<string>('download_error', (event) => {
-          logger.error('FileReceive', 'Download failed', event.payload);
-          setStatus('error');
+        await listen<string>("download_error", (event) => {
+          logger.error("FileReceive", "Download failed", event.payload);
+          setStatus("error");
           setStatusMessage(`Error: ${event.payload}`);
           setProgress(0);
         })
@@ -199,15 +245,18 @@ const FileReceive: React.FC = () => {
 
   // Handle key down for backspace and arrow navigation
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !code[index] && index > 0) {
+    if (e.key === "Backspace" && !code[index] && index > 0) {
       if (inputRefs.current[index - 1]) {
         inputRefs.current[index - 1]?.focus();
       }
-    } else if (e.key === 'ArrowLeft' && index > 0) {
+    } else if (e.key === "ArrowLeft" && index > 0) {
       if (inputRefs.current[index - 1]) {
         inputRefs.current[index - 1]?.focus();
       }
-    } else if (e.key === 'ArrowRight' && index < FILE_TRANSFER_CONFIG.CODE_LENGTH - 1) {
+    } else if (
+      e.key === "ArrowRight" &&
+      index < FILE_TRANSFER_CONFIG.CODE_LENGTH - 1
+    ) {
       if (inputRefs.current[index + 1]) {
         inputRefs.current[index + 1]?.focus();
       }
@@ -217,12 +266,14 @@ const FileReceive: React.FC = () => {
   // Handle paste for the entire code
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').trim();
+    const pastedData = e.clipboardData.getData("text").trim();
 
     // If pasted data matches the expected format
-    const pattern = new RegExp(`^[a-zA-Z0-9]{${FILE_TRANSFER_CONFIG.CODE_LENGTH}}$`);
+    const pattern = new RegExp(
+      `^[a-zA-Z0-9]{${FILE_TRANSFER_CONFIG.CODE_LENGTH}}$`
+    );
     if (pattern.test(pastedData)) {
-      const chars = pastedData.split('').map((char) => char.toUpperCase());
+      const chars = pastedData.split("").map((char) => char.toUpperCase());
       setCode(chars);
 
       // Focus the last input after paste
@@ -238,51 +289,53 @@ const FileReceive: React.FC = () => {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Download Location',
+        title: "Select Download Location",
       });
 
       if (selected && !Array.isArray(selected)) {
         setDownloadPath(selected);
         await saveDownloadPath(selected);
-        logger.info('FileReceive', `Download path updated to: ${selected}`);
+        logger.info("FileReceive", `Download path updated to: ${selected}`);
       }
     } catch (error) {
-      logger.error('FileReceive', 'Error selecting directory', error);
+      logger.error("FileReceive", "Error selecting directory", error);
     }
   };
 
   const handleReceive = async () => {
-    const fullCode = code.join('');
+    const fullCode = code.join("");
 
     if (fullCode.length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) {
-      setStatus('error');
-      setStatusMessage(`Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code`);
+      setStatus("error");
+      setStatusMessage(
+        `Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code`
+      );
       return;
     }
 
     if (!downloadPath) {
-      setStatus('error');
-      setStatusMessage('Please select a download location');
+      setStatus("error");
+      setStatusMessage("Please select a download location");
       return;
     }
 
-    setStatus('processing');
-    setStatusMessage('Connecting to sender...');
+    setStatus("processing");
+    setStatusMessage("Connecting to sender...");
     setProgress(0);
 
     try {
       await saveDownloadPath(downloadPath);
 
-      logger.info('FileReceive', `Initiating download with code: ${fullCode}`);
+      logger.info("FileReceive", `Initiating download with code: ${fullCode}`);
 
-      await invoke<string>('receive_file_command', {
+      await invoke<string>("receive_file_command", {
         ticket: fullCode,
         fileStoragePath: downloadPath,
         verbose: API_CONFIG.VERBOSE_MODE,
       });
     } catch (error) {
-      logger.error('FileReceive', 'Error receiving file', error);
-      setStatus('error');
+      logger.error("FileReceive", "Error receiving file", error);
+      setStatus("error");
       setStatusMessage(`Error: ${error}`);
       setProgress(0);
     }
@@ -290,9 +343,9 @@ const FileReceive: React.FC = () => {
 
   // Reset the form
   const handleReset = () => {
-    setCode(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(''));
-    setStatus('idle');
-    setStatusMessage('');
+    setCode(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(""));
+    setStatus("idle");
+    setStatusMessage("");
     setProgress(0);
     setDownloadComplete(false);
     setDownloadStats(null);
@@ -307,12 +360,12 @@ const FileReceive: React.FC = () => {
 
   // Helper function to format bytes
   const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return "0 B";
 
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
 
-    return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
   };
 
   // Helper function to format time
@@ -419,7 +472,7 @@ const FileReceive: React.FC = () => {
                   onKeyDown={(e) => handleKeyDown(index, e)}
                   onPaste={index === 0 ? handlePaste : undefined}
                   className="w-12 h-14 text-center text-xl font-mono border-border focus:border-primary focus:ring-primary/30 p-0"
-                  disabled={status === 'processing'}
+                  disabled={status === "processing"}
                 />
               ))}
             </div>
@@ -436,13 +489,13 @@ const FileReceive: React.FC = () => {
                 value={downloadPath}
                 onChange={(e) => setDownloadPath(e.target.value)}
                 placeholder="Download location"
-                disabled={status === 'processing'}
+                disabled={status === "processing"}
                 className="flex-1 border-border text-xs h-9"
               />
               <Button
                 variant="outline"
                 onClick={handleBrowse}
-                disabled={status === 'processing'}
+                disabled={status === "processing"}
                 className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
                 size="icon"
                 title="Browse for folder"
@@ -467,13 +520,13 @@ const FileReceive: React.FC = () => {
               className="w-full flex items-center gap-2"
               onClick={handleReceive}
               disabled={
-                code.join('').length !== FILE_TRANSFER_CONFIG.CODE_LENGTH ||
+                code.join("").length !== FILE_TRANSFER_CONFIG.CODE_LENGTH ||
                 !downloadPath ||
-                status === 'processing'
+                status === "processing"
               }
               variant="default"
             >
-              {status === 'processing' ? (
+              {status === "processing" ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Receiving...</span>
@@ -486,7 +539,7 @@ const FileReceive: React.FC = () => {
               )}
             </Button>
 
-            {(status === 'error' || status === 'success') && (
+            {(status === "error" || status === "success") && (
               <Button
                 variant="outline"
                 onClick={handleReset}
@@ -499,22 +552,48 @@ const FileReceive: React.FC = () => {
             )}
           </div>
 
-          {status === 'processing' && (
-            <div className="space-y-2 mt-4 border border-border rounded-lg p-3 bg-muted">
+          {status === "processing" && (
+            <div className="space-y-3 mt-4 border border-border rounded-lg p-4 bg-muted">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-medium truncate max-w-[70%]">
-                  {fileName || 'Downloading file...'}
+                  {fileName || "Downloading file..."}
                 </span>
-                <span className="font-medium">{Math.round(progress)}%</span>
+                <span className="font-medium text-primary">
+                  {Math.round(progress)}%
+                </span>
               </div>
               <Progress value={progress} className="h-2" />
-              <p className="text-xs text-center text-muted-foreground">
-                {statusMessage || 'Please wait...'}
+
+              {liveStats && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
+                  <div className="text-xs">
+                    <div className="text-muted-foreground">Progress</div>
+                    <div className="font-medium">
+                      {liveStats.bytesTransferred} / {liveStats.totalBytes}
+                    </div>
+                  </div>
+                  <div className="text-xs">
+                    <div className="text-muted-foreground">Speed</div>
+                    <div className="font-medium">{liveStats.speed}</div>
+                  </div>
+                  {liveStats.eta !== "0s" && (
+                    <div className="text-xs col-span-2">
+                      <div className="text-muted-foreground">
+                        Estimated Time
+                      </div>
+                      <div className="font-medium">{liveStats.eta}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs text-center text-muted-foreground pt-1">
+                {statusMessage || "Please wait..."}
               </p>
             </div>
           )}
 
-          {status === 'error' && statusMessage && (
+          {status === "error" && statusMessage && (
             <div className="p-3 rounded-md bg-muted border border-destructive mt-4">
               <div className="flex items-center gap-2 text-destructive">
                 <X className="h-4 w-4 shrink-0" />
@@ -523,7 +602,7 @@ const FileReceive: React.FC = () => {
             </div>
           )}
 
-          {status !== 'error' && status !== 'processing' && statusMessage && (
+          {status !== "error" && status !== "processing" && statusMessage && (
             <div className="p-3 rounded-md bg-muted border border-primary mt-4">
               <div className="flex items-center gap-2 text-primary">
                 <p className="text-xs">{statusMessage}</p>

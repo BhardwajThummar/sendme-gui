@@ -1,6 +1,5 @@
 // src-tauri/src/sender_state.rs
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::{path::PathBuf, sync::Mutex};
 
 // Adjust the type of the router as needed (this example uses the same type as your send function).
 // You may need to import iroh::protocol::Router from your code.

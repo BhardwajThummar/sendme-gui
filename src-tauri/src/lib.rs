@@ -11,20 +11,16 @@ mod logger;
 mod sender_state;
 mod sendme;
 
-use sender_state::{SenderState, SharedSenderState};
-use std::fs;
-use std::path::Path;
-use std::sync::Mutex;
-use tauri::{Emitter, State, Window};
-
 #[cfg(not(target_os = "android"))]
 use std::time::Instant;
+use std::{fs, path::Path, sync::Mutex};
 
+use config::config;
 #[cfg(not(target_os = "android"))]
 use dirs;
-
+use sender_state::{SenderState, SharedSenderState};
+use tauri::{Emitter, State, Window};
 use tauri_plugin_store;
-use config::config;
 
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = get_home_dir();
@@ -205,17 +201,20 @@ async fn receive_file_with_stats(
 
         // Create a window clone for use in the blocking task
         let window_clone = window.clone();
+        let window_for_progress = window.clone();
 
         // Run the non-Send future in a blocking task.
         let result = tauri::async_runtime::spawn_blocking(move || {
             // Run the original function inside the blocking task
             futures::executor::block_on(async {
-                // First update status
-                let _ = window_clone.emit("download_status", "Connecting to sender...");
-
-                // Call the original function to do the actual download
-                let result =
-                    sendme::receive_file_minimal(ticket, file_storage_path.clone(), verbose).await;
+                // Call the new progress-aware function
+                let result = sendme::receive_file_with_progress(
+                    ticket,
+                    file_storage_path.clone(),
+                    verbose,
+                    window_for_progress,
+                )
+                .await;
 
                 // If download was successful, get file information and emit completion event
                 if result.is_ok() {
