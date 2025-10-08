@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { logger } from './logger';
 
 export interface ResolvedFileEntry {
     path: string;
@@ -72,7 +73,7 @@ async function safeGetFileSize(path: string): Promise<number | null> {
         const size = await invoke<number>('get_file_size', { path });
         return Number.isFinite(size) ? size : null;
     } catch (error) {
-        console.warn('Failed to get file size for path', path, error);
+        logger.warn('FileSelection', `Failed to get file size for path: ${path}`, error);
         return null;
     }
 }

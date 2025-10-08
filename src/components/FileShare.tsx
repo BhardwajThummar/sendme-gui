@@ -1,9 +1,10 @@
-// src/components/FileShare.tsx
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { resolveFileEntries } from "@/utils/fileSelection";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { logger } from "@/utils/logger";
+import { API_CONFIG, UI_CONFIG } from "@/config/app.config";
 import {
   CheckCircle,
   Copy,
@@ -86,46 +87,40 @@ const FileShare: React.FC = () => {
       setStatus("idle");
       setStatusMessage("");
     } catch (error) {
-      console.error("Error resolving file selection:", error);
+      logger.error("FileShare", "Error resolving file selection", error);
       setStatus("error");
       setStatusMessage("Error getting file information");
     }
   };
 
-  // Handle file selection using Tauri's dialog API
   const handleFileSelect = async () => {
     try {
-      console.log("Opening file dialog...");
       const selected = await open({
         multiple: true,
         title: "Select Files to Share",
       });
 
-      console.log("Files selected:", selected);
       await processSelection(selected ?? null);
     } catch (error) {
-      console.error("Error selecting files:", error);
+      logger.error("FileShare", "Error selecting files", error);
       setStatus("error");
       setStatusMessage(`Error selecting files: ${error}`);
     }
   };
-  // Handle directory selection using Tauri's dialog API
+
   const handleDirSelect = async () => {
     try {
-      console.log("Opening file dialog...");
       const selected = await open({
         multiple: true,
         directory: true,
         title: "Select Directories to Share",
       });
 
-      console.log("Directories selected:", selected);
-
       if (selected && Array.isArray(selected) && selected.length > 0) {
         await processSelection(selected);
       }
     } catch (error) {
-      console.error("Error selecting files:", error);
+      logger.error("FileShare", "Error selecting directories", error);
       setStatus("error");
       setStatusMessage(`Error selecting files: ${error}`);
     }
@@ -151,21 +146,19 @@ const FileShare: React.FC = () => {
     setStatusMessage("Preparing your files...");
 
     try {
-      // Use the first selected file path since the backend expects a single filePath
       const filePath = selectedFiles[0].path;
 
-      // Call the Tauri command with the correct parameter name
       const result = await invoke<string>("send_file_command", {
         filePath: filePath,
-        verbose: false,
+        verbose: API_CONFIG.VERBOSE_MODE,
       });
 
-      // Set the share code received from backend
       setShareCode(result);
       setStatus("success");
       setStatusMessage("Your files are ready to share!");
+      logger.info("FileShare", `Share code generated: ${result}`);
     } catch (error) {
-      console.error("Error sharing files:", error);
+      logger.error("FileShare", "Error sharing files", error);
       setStatus("error");
       setStatusMessage(`Error: ${error}`);
     }
@@ -176,12 +169,11 @@ const FileShare: React.FC = () => {
     navigator.clipboard.writeText(shareCode);
     setStatusMessage("Code copied to clipboard!");
 
-    // Reset the message after 2 seconds
     setTimeout(() => {
       if (status === "success") {
         setStatusMessage("Your files are ready to share!");
       }
-    }, 2000);
+    }, UI_CONFIG.CLIPBOARD_NOTIFICATION_DURATION);
   };
 
   // Reset the share process

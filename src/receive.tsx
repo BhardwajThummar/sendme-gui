@@ -1,7 +1,7 @@
-// src/App.tsx (or another component)
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getDownloadsFolderPath } from './utils/paths';
+import { logger } from './utils/logger';
 
 const ReceiveFile: React.FC = () => {
   const [ticket, setTicket] = useState<string>('');
@@ -23,7 +23,7 @@ const ReceiveFile: React.FC = () => {
       const result = await invoke<string>('receive_file_command', { ticket, fileStoragePath, verbose : false });
       setStatus(result);
     } catch (error) {
-      console.error('Error receiving file:', error);
+      logger.error('ReceiveFile', 'Error receiving file', error);
       setStatus(`Error: ${error}`);
     }
   };
