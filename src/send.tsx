@@ -1,7 +1,7 @@
-// src/App.tsx (or another component)
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getDownloadsFolderPath } from './utils/paths';
+import { logger } from './utils/logger';
 
 const SendFile: React.FC = () => {
   // const [verbose, setVerbose] = useState<boolean>(false);
@@ -22,7 +22,7 @@ const SendFile: React.FC = () => {
       const result = await invoke<string>('send_file_command', { filePath:fileStoragePath, verbose: false });
       setStatus(result);
     } catch (error) {
-      console.error('Error Prepating:', error);
+      logger.error('SendFile', 'Error preparing file', error);
       setStatus(`Error: ${error}`);
     }
   };

@@ -5,9 +5,11 @@
 
 // Import modules
 mod android_compat;
+mod config;
 mod events;
+mod logger;
 mod sender_state;
-mod sendme; // Replace with the name of the module that contains your functions // New module for event types // Compatibility layer for Android
+mod sendme;
 
 use sender_state::{SenderState, SharedSenderState};
 use std::fs;
@@ -21,12 +23,8 @@ use std::time::Instant;
 #[cfg(not(target_os = "android"))]
 use dirs;
 
-use dotenv::dotenv;
-use std::env; // Import the env module
 use tauri_plugin_store;
-
-// Define a constant for the sendme temporary directory prefix
-const DIR_PREFIX: &str = ".sendme-";
+use config::config;
 
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = get_home_dir();
@@ -38,8 +36,9 @@ fn get_home_dir() -> std::path::PathBuf {
     #[cfg(target_os = "android")]
     {
         // On Android, use app-specific directory
+        let cfg = config();
         android_compat::android::get_android_external_files_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("/sdcard"))
+            .unwrap_or_else(|_| std::path::PathBuf::from(&cfg.platform.sdcard_fallback_path))
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -48,20 +47,27 @@ fn get_home_dir() -> std::path::PathBuf {
 }
 
 fn get_temp_dir() -> std::path::PathBuf {
+    let cfg = config();
+
     #[cfg(target_os = "android")]
     {
         // On Android, use app-specific external files directory
         let mut path =
             android_compat::android::get_android_external_files_dir().unwrap_or_else(|_| {
-                std::path::PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files")
+                let mut p = std::path::PathBuf::from(&cfg.platform.sdcard_fallback_path);
+                p.push("Android/data");
+                p.push(&cfg.platform.android_package_name);
+                p.push("files");
+                p
             });
-        path.push(format!("{}temp", DIR_PREFIX));
+        path.push(format!("{}temp", cfg.storage.temp_dir_prefix));
         path
     }
     #[cfg(not(target_os = "android"))]
     {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        home.join("Documents").join(format!("{}temp", DIR_PREFIX))
+        home.join(&cfg.storage.documents_folder)
+            .join(format!("{}temp", cfg.storage.temp_dir_prefix))
     }
 }
 
@@ -315,23 +321,23 @@ fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
 fn get_downloads_dir() -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        println!("[get_downloads_dir] Android: Getting downloads directory");
+        logger::info!("Getting Android downloads directory");
         // On Android, use app-specific Downloads directory
         match android_compat::android::get_android_downloads_dir() {
             Ok(path) => {
-                println!("[get_downloads_dir] Android: Path obtained: {:?}", path);
+                logger::debug!("Android downloads path obtained: {:?}", path);
                 // Create the directory if it doesn't exist
                 if let Err(e) = std::fs::create_dir_all(&path) {
-                    eprintln!("[get_downloads_dir] Android: Failed to create downloads directory: {}", e);
+                    logger::error!("Failed to create Android downloads directory: {}", e);
                     return Err(format!("Failed to create downloads directory: {}", e));
                 }
-                println!("[get_downloads_dir] Android: Directory created successfully");
+                logger::debug!("Android downloads directory created successfully");
                 let path_string = path.to_string_lossy().to_string();
-                println!("[get_downloads_dir] Android: Returning path: {}", path_string);
+                logger::info!("Returning Android downloads path: {}", path_string);
                 Ok(path_string)
             }
             Err(e) => {
-                eprintln!("[get_downloads_dir] Android: Error: {}", e);
+                logger::error!("Could not determine Android downloads directory: {}", e);
                 Err(format!("Could not determine downloads directory: {}", e))
             }
         }
@@ -399,20 +405,23 @@ fn calculate_directory_size(path: &Path) -> Result<u64, std::io::Error> {
     Ok(total)
 }
 
-/// Deletes all directories in the current directory whose names start with DIR_PREFIX.
+/// Deletes all directories in the current directory whose names start with temp_dir_prefix.
 fn cleanup_sendme_dirs() {
+    let cfg = config();
+    let prefix = &cfg.storage.temp_dir_prefix;
+
     if let Ok(current_dir) = CWD.canonicalize() {
         match std::fs::read_dir(&current_dir) {
             Ok(entries) => {
                 for entry in entries.flatten() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if name.starts_with(DIR_PREFIX) {
+                        if name.starts_with(prefix.as_str()) {
                             let path = entry.path();
                             if path.is_dir() {
                                 match std::fs::remove_dir_all(&path) {
-                                    Ok(_) => println!("Removed directory: {}", path.display()),
+                                    Ok(_) => logger::info!("Removed directory: {}", path.display()),
                                     Err(e) => {
-                                        eprintln!("Failed to remove {}: {}", path.display(), e)
+                                        logger::error!("Failed to remove {}: {}", path.display(), e)
                                     }
                                 }
                             }
@@ -420,23 +429,26 @@ fn cleanup_sendme_dirs() {
                     }
                 }
             }
-            Err(e) => eprintln!("Failed to read current directory: {}", e),
+            Err(e) => logger::error!("Failed to read current directory: {}", e),
         }
     } else {
-        eprintln!("Could not determine the current directory for cleanup.");
+        logger::error!("Could not determine the current directory for cleanup");
     }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize configuration and logger
+    config::AppConfig::init();
+    logger::init();
+
+    logger::info!("Starting SendMe application");
+
     // Set a panic hook to attempt cleanup on a crash.
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("Application panicked: {:?}", panic_info);
+        logger::error!("Application panicked: {:?}", panic_info);
         cleanup_sendme_dirs();
     }));
-
-    //Read the environment variables from a file
-    dotenv().ok(); // Read the .env file
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

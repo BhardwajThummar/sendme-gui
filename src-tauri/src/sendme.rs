@@ -1,6 +1,7 @@
 //! Command line arguments.
 
-use std::env;
+use crate::config::config;
+use crate::logger::{debug, error, info, warn};
 use std::{
     collections::BTreeMap,
     fmt::{Display, Formatter},
@@ -9,10 +10,7 @@ use std::{
     str::FromStr,
     sync::Arc,
     time::Duration,
-}; // Import the env module
-lazy_static::lazy_static! {
-    static ref API_URL: String = env::var("API_URL").unwrap_or_default();
-}
+};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use console::style;
@@ -43,9 +41,6 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-// Define a constant for the sendme temporary directory prefix
-const DIR_PREFIX: &str = ".sendme-";
-
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = get_home_dir();
     static ref CWD: std::path::PathBuf = get_temp_dir();
@@ -53,13 +48,14 @@ lazy_static::lazy_static! {
 
 // Platform-specific path resolution
 fn get_home_dir() -> std::path::PathBuf {
+    let _cfg = config();
+
     #[cfg(target_os = "android")]
     {
-        // On Android, use app-specific directory
         use std::path::PathBuf;
         std::env::var("EXTERNAL_STORAGE")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/sdcard"))
+            .unwrap_or_else(|_| PathBuf::from(&_cfg.platform.sdcard_fallback_path))
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -68,24 +64,32 @@ fn get_home_dir() -> std::path::PathBuf {
 }
 
 fn get_temp_dir() -> std::path::PathBuf {
+    let cfg = config();
+
     #[cfg(target_os = "android")]
     {
-        // On Android, use app-specific external files directory
         use std::path::PathBuf;
         let mut path = if let Ok(external_storage) = std::env::var("EXTERNAL_STORAGE") {
             let mut p = PathBuf::from(external_storage);
-            p.push("Android/data/com.sendme_gui_tauri_1.app/files");
+            p.push("Android/data");
+            p.push(&cfg.platform.android_package_name);
+            p.push("files");
             p
         } else {
-            PathBuf::from("/sdcard/Android/data/com.sendme_gui_tauri_1.app/files")
+            let mut p = PathBuf::from(&cfg.platform.sdcard_fallback_path);
+            p.push("Android/data");
+            p.push(&cfg.platform.android_package_name);
+            p.push("files");
+            p
         };
-        path.push(format!("{}temp", DIR_PREFIX));
+        path.push(format!("{}temp", cfg.storage.temp_dir_prefix));
         path
     }
     #[cfg(not(target_os = "android"))]
     {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        home.join("Documents").join(format!("{}temp", DIR_PREFIX))
+        home.join(&cfg.storage.documents_folder)
+            .join(format!("{}temp", cfg.storage.temp_dir_prefix))
     }
 }
 
@@ -311,7 +315,7 @@ fn get_or_create_secret(print: bool) -> anyhow::Result<SecretKey> {
         Err(_) => {
             let key = SecretKey::generate(rand::rngs::OsRng);
             if print {
-                eprintln!("using secret key {}", key);
+                info!("Using secret key: {}", key);
             }
             Ok(key)
         }
@@ -518,16 +522,12 @@ async fn export(
     collection: Collection,
     storage_file_path: String,
 ) -> anyhow::Result<()> {
-    // let root = std::env::current_dir()?;
     let root = PathBuf::from(storage_file_path);
     for (name, hash) in collection.iter() {
         let target = get_export_path(&root, name)?;
         if target.exists() {
-            eprintln!(
-                "target {} already exists. Export stopped.",
-                target.display()
-            );
-            eprintln!("You can remove the file or directory and try again. The download will not be repeated.");
+            error!("Target {} already exists. Export stopped", target.display());
+            warn!("You can remove the file or directory and try again. The download will not be repeated");
             anyhow::bail!("target {} already exists", target.display());
         }
         db.export(
@@ -661,36 +661,31 @@ struct GetBlobResponse {
 }
 
 pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
+    let cfg = config();
     let client = Client::new();
     let payload = BlobRequest { blobs: vec![blob] };
 
-    // Get BASE_URL with fallback to production URL
-    let base_url = std::env::var("BASE_URL")
-        .unwrap_or_else(|_| "https://send.hindalert.com".to_string());
-
-    println!("create_blob: Using BASE_URL: {}", base_url);
+    info!("Creating blob using BASE_URL: {}", cfg.api.base_url);
 
     let response = client
-        .post(&format!("{}/api/code/", base_url))
+        .post(&format!("{}/api/code/", cfg.api.base_url))
         .json(&payload)
         .send()
         .await?
         .json::<BlobResponse>()
         .await?;
-    println!("Code111111: {}", response.code);
+
+    info!("Blob created successfully with code: {}", response.code);
     Ok(response.code)
 }
 
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
+    let cfg = config();
     let client = Client::new();
 
-    // Get BASE_URL with fallback to production URL
-    let base_url = std::env::var("BASE_URL")
-        .unwrap_or_else(|_| "https://send.hindalert.com".to_string());
+    debug!("Fetching blob with code: {}", code);
 
-    println!("get_blob: Using BASE_URL: {}", base_url);
-
-    let url: String = format!("{}/api/code/{}", base_url, code);
+    let url: String = format!("{}/api/code/{}", cfg.api.base_url, code);
 
     let response = client
         .get(&url)
@@ -699,6 +694,7 @@ pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
         .json::<GetBlobResponse>()
         .await?;
 
+    info!("Successfully fetched {} blob(s)", response.blobs.len());
     Ok(response.blobs)
 }
 
@@ -805,8 +801,12 @@ fn show_get_error(e: anyhow::Error) -> anyhow::Error {
 }
 
 pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result<()> {
+    let cfg = config();
     let ticket = args.ticket;
     let addr = ticket.node_addr().clone();
+
+    info!("Starting file receive from node: {}", addr.node_id);
+
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
     let mut builder = Endpoint::builder()
         .alpns(vec![])
@@ -823,7 +823,7 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
         builder = builder.bind_addr_v6(addr);
     }
     let endpoint = builder.bind().await?;
-    let dir_name = format!("{}get-{}", DIR_PREFIX, ticket.hash().to_hex());
+    let dir_name = format!("{}get-{}", cfg.storage.temp_dir_prefix, ticket.hash().to_hex());
     let iroh_data_dir = CWD.join(dir_name);
     let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
     let mp = MultiProgress::new();
@@ -846,16 +846,16 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
     let total_size = sizes.iter().sum::<u64>();
     let total_files = sizes.len().saturating_sub(1);
     let payload_size = sizes.iter().skip(1).sum::<u64>();
-    eprintln!(
-        "getting collection {} {} files, {}",
+    info!(
+        "Getting collection {} {} files, {}",
         print_hash(&ticket.hash(), args.common.format),
         total_files,
         HumanBytes(payload_size)
     );
     // print the details of the collection only in verbose mode
     if args.common.verbose > 0 {
-        eprintln!(
-            "getting {} blobs in total, {}",
+        debug!(
+            "Getting {} blobs in total, {}",
             sizes.len(),
             HumanBytes(total_size)
         );
@@ -868,19 +868,19 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
     let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
     if args.common.verbose > 0 {
         for (name, hash) in collection.iter() {
-            println!("    {} {name}", print_hash(hash, args.common.format));
+            debug!("    {} {name}", print_hash(hash, args.common.format));
         }
     }
     if let Some((name, _)) = collection.iter().next() {
         if let Some(first) = name.split('/').next() {
-            println!("downloading to: {};", first);
+            info!("Downloading to: {}", first);
         }
     }
     export(db, collection, storage_file_path).await?;
     tokio::fs::remove_dir_all(iroh_data_dir).await?;
     if args.common.verbose > 0 {
-        println!(
-            "downloaded {} files, {}. took {} ({}/s)",
+        info!(
+            "Downloaded {} files, {}. Took {} ({}/s)",
             total_files,
             HumanBytes(payload_size),
             HumanDuration(stats.elapsed),
@@ -894,13 +894,17 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
 pub async fn start_send(
     args: SendArgs,
 ) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
-    println!("[start_send] Step 1: Getting secret key");
+    let cfg = config();
+
+    debug!("Getting secret key");
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
-    println!("[start_send] Step 2: Building endpoint");
+
+    debug!("Building endpoint");
     let mut builder = Endpoint::builder()
         .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
         .secret_key(secret_key)
         .relay_mode(args.common.relay.into());
+
     if args.ticket_type == AddrInfoOptions::Id {
         builder =
             builder.add_discovery(|secret_key| Some(PkarrPublisher::n0_dns(secret_key.clone())));
@@ -913,70 +917,69 @@ pub async fn start_send(
     }
 
     // Create a unique directory for this sending session.
-    println!("[start_send] Step 3: Creating blobs data directory");
+    debug!("Creating blobs data directory");
     let suffix = rand::thread_rng().gen::<[u8; 16]>();
-    let blobs_data_dir = CWD.join(format!("{}send-{}", DIR_PREFIX, HEXLOWER.encode(&suffix)));
-    if blobs_data_dir.exists() {
-        println!(
-            "cannot share twice from the same directory: {}",
-            CWD.display(),
-        );
-        std::process::exit(1);
-    }
-    tokio::fs::create_dir_all(&blobs_data_dir).await?;
-    println!("[start_send] Step 4: Blobs directory created: {:?}", blobs_data_dir);
+    let blobs_data_dir = CWD.join(format!("{}send-{}", cfg.storage.temp_dir_prefix, HEXLOWER.encode(&suffix)));
 
-    println!("[start_send] Step 5: Binding endpoint");
+    if blobs_data_dir.exists() {
+        error!("Cannot share twice from the same directory: {}", CWD.display());
+        anyhow::bail!("Cannot share twice from the same directory: {}", CWD.display());
+    }
+
+    tokio::fs::create_dir_all(&blobs_data_dir).await?;
+    debug!("Blobs directory created: {:?}", blobs_data_dir);
+
+    debug!("Binding endpoint");
     let endpoint = builder.bind().await?;
-    println!("[start_send] Step 6: Creating blobs store");
+
+    debug!("Creating blobs store");
     let ps = SendStatus::new();
     let blobs = Blobs::persistent(&blobs_data_dir)
         .await?
         .events(ps.new_client().into())
         .build(&endpoint);
 
-    println!("[start_send] Step 7: Building router");
+    debug!("Building router");
     let router = iroh::protocol::Router::builder(endpoint)
         .accept(iroh_blobs::ALPN, blobs.clone())
         .spawn()
         .await?;
 
-    println!("[start_send] Step 8: Importing file: {:?}", args.path);
+    info!("Importing file: {:?}", args.path);
     let path = args.path;
     let (temp_tag, size, collection) = import(path.clone(), blobs.store().clone()).await?;
-    println!("[start_send] Step 9: Import complete, size: {}", size);
+    info!("Import complete, size: {}", HumanBytes(size));
     let hash = *temp_tag.hash();
 
     // Wait for the endpoint to be ready.
-    println!("[start_send] Step 10: Waiting for relay initialization");
+    debug!("Waiting for relay initialization");
     let _ = router.endpoint().home_relay().initialized().await?;
-    println!("[start_send] Step 11: Relay initialized");
+    debug!("Relay initialized");
 
-    println!("[start_send] Step 12: Getting node address");
+    debug!("Getting node address");
     let mut addr = router.endpoint().node_addr().await?;
     apply_options(&mut addr, args.ticket_type);
     let ticket = BlobTicket::new(addr, hash, BlobFormat::HashSeq)?;
-    println!("[start_send] Step 13: Ticket created successfully");
+    info!("Ticket created successfully");
 
     let entry_type = if path.is_file() { "file" } else { "directory" };
-    println!(
-        "imported {} {}, {}, hash {}",
+    info!(
+        "Imported {} {}, {}, hash {}",
         entry_type,
         path.display(),
         HumanBytes(size),
         print_hash(&hash, args.common.format)
     );
+
     if args.common.verbose > 0 {
         for (name, hash) in collection.iter() {
-            println!("    {} {name}", print_hash(hash, args.common.format));
+            debug!("    {} {name}", print_hash(hash, args.common.format));
         }
     }
-    // println!("to get this data, use");
-    // println!("sendme receive {}", ticket);
+
     drop(temp_tag);
 
-    // Instead of waiting for ctrl-c and shutting down,
-    // return the ticket along with the router and data directory.
+    // Return the ticket along with the router and data directory
     Ok((ticket, router, blobs_data_dir))
 }
 
@@ -1005,7 +1008,7 @@ pub async fn send_file_minimal(
     // Call our new start_send() which sets up sharing.
     let (ticket, router, blobs_data_dir) = start_send(send_args).await?;
 
-    print!("Sharing file: {}", ticket);
+    info!("Sharing file with ticket: {}", ticket);
 
     // Store the router and blobs_data_dir in global state so we can later shut down the sender.
     {
@@ -1023,6 +1026,7 @@ pub async fn send_file_minimal(
 }
 
 pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result<()> {
+    let cfg = config();
     let (router, blobs_data_dir) = {
         let mut sender_state = state.lock().unwrap();
         (
@@ -1032,11 +1036,20 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
     };
 
     if let Some(router) = router {
-        tokio::time::timeout(Duration::from_secs(2), router.shutdown()).await??;
+        debug!("Shutting down router");
+        tokio::time::timeout(
+            Duration::from_secs(cfg.network.router_shutdown_timeout_secs),
+            router.shutdown()
+        ).await??;
+        info!("Router shutdown complete");
     }
+
     if let Some(dir) = blobs_data_dir {
-        tokio::fs::remove_dir_all(dir).await?;
+        debug!("Cleaning up blobs directory: {:?}", dir);
+        tokio::fs::remove_dir_all(&dir).await?;
+        info!("Blobs directory cleaned up");
     }
+
     Ok(())
 }
 
@@ -1045,13 +1058,14 @@ pub async fn receive_file_minimal(
     file_storage_path: String,
     verbose: bool,
 ) -> anyhow::Result<String> {
-    // ticket
-    // print!("{:?}", ticket);
-    // println!("Receiving file from ticket: {}", ticket);
+    debug!("Receiving file from ticket: {}", ticket);
 
     let blob = match get_blob(ticket).await {
         Ok(blob) => blob,
-        Err(_err) => return Err(anyhow::anyhow!("Failed to get blob")),
+        Err(err) => {
+            error!("Failed to get blob: {}", err);
+            return Err(anyhow::anyhow!("Failed to get blob: {}", err));
+        }
     };
 
     // Parse the ticket string into a BlobTicket.

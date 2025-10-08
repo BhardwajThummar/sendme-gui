@@ -1,4 +1,3 @@
-// src/components/FileReceive.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -7,6 +6,8 @@ import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import { logger } from '@/utils/logger';
+import { PLATFORM_CONFIG, FILE_TRANSFER_CONFIG, UI_CONFIG, API_CONFIG } from '@/config/app.config';
 import {
   Download,
   FolderOpen,
@@ -29,7 +30,7 @@ interface DownloadCompletedEvent {
 }
 
 const FileReceive: React.FC = () => {
-  const [code, setCode] = useState<string[]>(Array(6).fill(''));
+  const [code, setCode] = useState<string[]>(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(''));
   const [downloadPath, setDownloadPath] = useState<string>('');
   const [status, setStatus] = useState<
     'idle' | 'processing' | 'success' | 'error'
@@ -47,58 +48,36 @@ const FileReceive: React.FC = () => {
   const [isAndroid, setIsAndroid] = useState(false);
 
   // Create refs for each input field
-  const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null));
+  const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(null));
 
   // Initialize download path and set up event listeners
   useEffect(() => {
-    const isAndroidPlatform = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+    const isAndroidPlatform = typeof navigator !== 'undefined' && PLATFORM_CONFIG.ANDROID_USER_AGENT_PATTERN.test(navigator.userAgent);
 
-    // Detect if running on Android
     setIsAndroid(isAndroidPlatform);
 
     // On Android, immediately set the default path to system Downloads
     if (isAndroidPlatform) {
-      const defaultAndroidPath = '/sdcard/Download';
-      setDownloadPath(defaultAndroidPath);
-      console.log('[FileReceive] Android detected, set default path:', defaultAndroidPath);
+      setDownloadPath(PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH);
+      logger.info('FileReceive', `Android platform detected, using path: ${PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH}`);
     }
 
     const initPath = async () => {
-      // Skip async path lookup on Android since we already set it
       if (isAndroidPlatform) {
-        console.log('[FileReceive] Skipping async path lookup on Android');
         return;
       }
 
       try {
-        console.log('[FileReceive] Initializing download path...');
-
-        // Try to get the downloads folder path
-        let path = '';
-
-        try {
-          path = await getDownloadsFolderPath();
-          console.log('[FileReceive] getDownloadsFolderPath returned:', path);
-        } catch (err) {
-          console.error('[FileReceive] getDownloadsFolderPath error:', err);
-        }
+        let path = await getDownloadsFolderPath();
 
         if (!path) {
-          // If for some reason we couldn't get the downloads folder, try to get it directly
-          console.log('[FileReceive] Trying get_downloads_dir command...');
-          try {
-            const downloadsDir = await invoke<string>('get_downloads_dir');
-            console.log('[FileReceive] get_downloads_dir returned:', downloadsDir);
-            path = downloadsDir;
-          } catch (err) {
-            console.error('[FileReceive] get_downloads_dir error:', err);
-          }
+          path = await invoke<string>('get_downloads_dir');
         }
 
-        console.log('[FileReceive] Final download path:', path);
         setDownloadPath(path || '');
+        logger.info('FileReceive', `Download path initialized: ${path}`);
       } catch (error) {
-        console.error('[FileReceive] Error in initPath:', error);
+        logger.error('FileReceive', 'Failed to initialize download path', error);
         setDownloadPath('');
       }
     };
@@ -110,7 +89,7 @@ const FileReceive: React.FC = () => {
       if (inputRefs.current[0]) {
         inputRefs.current[0]?.focus();
       }
-    }, 100);
+    }, UI_CONFIG.INPUT_FOCUS_DELAY);
 
     // Set up event listeners for download events
     const setupListeners = async () => {
@@ -119,7 +98,7 @@ const FileReceive: React.FC = () => {
       // Listen for download start
       unlisteners.push(
         await listen('download_started', () => {
-          console.log('Download started');
+          logger.info('FileReceive', 'Download started');
           setStatus('processing');
           setStatusMessage('Starting download...');
 
@@ -128,16 +107,14 @@ const FileReceive: React.FC = () => {
           const interval = setInterval(() => {
             progressValue += 5;
 
-            // Cap at 90% (save the last 10% for actual completion)
-            if (progressValue > 90) {
+            if (progressValue > FILE_TRANSFER_CONFIG.PROGRESS_MAX_SIMULATED) {
               clearInterval(interval);
               return;
             }
 
             setProgress(progressValue);
-          }, 500);
+          }, FILE_TRANSFER_CONFIG.PROGRESS_INTERVAL_MS);
 
-          // Clear interval on component unmount
           return () => clearInterval(interval);
         })
       );
@@ -145,7 +122,7 @@ const FileReceive: React.FC = () => {
       // Listen for status updates
       unlisteners.push(
         await listen<string>('download_status', (event) => {
-          console.log('Download status:', event.payload);
+          logger.debug('FileReceive', `Status update: ${event.payload}`);
           setStatusMessage(event.payload);
         })
       );
@@ -153,18 +130,17 @@ const FileReceive: React.FC = () => {
       // Listen for download completion
       unlisteners.push(
         await listen<DownloadCompletedEvent>('download_completed', (event) => {
-          console.log('Download completed:', event.payload);
           const { filename, total_bytes, files_count, elapsed_time_ms } =
             event.payload;
 
-          // Update state with completion information
+          logger.info('FileReceive', `Download completed: ${filename} (${formatBytes(total_bytes)})`);
+
           setFileName(filename);
           setProgress(100);
           setStatus('success');
           setStatusMessage('Download complete!');
           setDownloadComplete(true);
 
-          // Format stats for display
           setDownloadStats({
             totalFiles: files_count,
             totalSize: formatBytes(total_bytes),
@@ -179,7 +155,7 @@ const FileReceive: React.FC = () => {
       // Listen for download errors
       unlisteners.push(
         await listen<string>('download_error', (event) => {
-          console.log('Download error:', event.payload);
+          logger.error('FileReceive', 'Download failed', event.payload);
           setStatus('error');
           setStatusMessage(`Error: ${event.payload}`);
           setProgress(0);
@@ -214,7 +190,7 @@ const FileReceive: React.FC = () => {
     setCode(newCode);
 
     // Auto-focus next input if current one is filled
-    if (value && index < 5) {
+    if (value && index < FILE_TRANSFER_CONFIG.CODE_LENGTH - 1) {
       if (inputRefs.current[index + 1]) {
         inputRefs.current[index + 1]?.focus();
       }
@@ -224,17 +200,14 @@ const FileReceive: React.FC = () => {
   // Handle key down for backspace and arrow navigation
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !code[index] && index > 0) {
-      // If current field is empty and backspace is pressed, move to previous field
       if (inputRefs.current[index - 1]) {
         inputRefs.current[index - 1]?.focus();
       }
     } else if (e.key === 'ArrowLeft' && index > 0) {
-      // Move to previous field on left arrow
       if (inputRefs.current[index - 1]) {
         inputRefs.current[index - 1]?.focus();
       }
-    } else if (e.key === 'ArrowRight' && index < 5) {
-      // Move to next field on right arrow
+    } else if (e.key === 'ArrowRight' && index < FILE_TRANSFER_CONFIG.CODE_LENGTH - 1) {
       if (inputRefs.current[index + 1]) {
         inputRefs.current[index + 1]?.focus();
       }
@@ -246,52 +219,44 @@ const FileReceive: React.FC = () => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData('text').trim();
 
-    // If pasted data matches the expected format (6 chars)
-    if (/^[a-zA-Z0-9]{6}$/.test(pastedData)) {
+    // If pasted data matches the expected format
+    const pattern = new RegExp(`^[a-zA-Z0-9]{${FILE_TRANSFER_CONFIG.CODE_LENGTH}}$`);
+    if (pattern.test(pastedData)) {
       const chars = pastedData.split('').map((char) => char.toUpperCase());
       setCode(chars);
 
       // Focus the last input after paste
-      if (inputRefs.current[5]) {
-        inputRefs.current[5]?.focus();
+      const lastIndex = FILE_TRANSFER_CONFIG.CODE_LENGTH - 1;
+      if (inputRefs.current[lastIndex]) {
+        inputRefs.current[lastIndex]?.focus();
       }
     }
   };
 
-  // Handle the browse button for download path
   const handleBrowse = async () => {
     try {
-      console.log('[FileReceive] Browse clicked, isAndroid:', isAndroid);
-
       const selected = await open({
         directory: true,
         multiple: false,
         title: 'Select Download Location',
       });
 
-      console.log('[FileReceive] Folder selected:', selected);
-
       if (selected && !Array.isArray(selected)) {
-        // Update the UI with the selected path
         setDownloadPath(selected);
-
-        // Save the selected path for future use
         await saveDownloadPath(selected);
-        console.log('[FileReceive] Download path updated to:', selected);
+        logger.info('FileReceive', `Download path updated to: ${selected}`);
       }
     } catch (error) {
-      console.error('[FileReceive] Error selecting directory:', error);
+      logger.error('FileReceive', 'Error selecting directory', error);
     }
   };
 
-  // Handle the receive button
   const handleReceive = async () => {
     const fullCode = code.join('');
-    console.log('[FileReceive] handleReceive called, code:', fullCode, 'downloadPath:', downloadPath);
 
-    if (fullCode.length !== 6) {
+    if (fullCode.length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) {
       setStatus('error');
-      setStatusMessage('Please enter a complete 6-character code');
+      setStatusMessage(`Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code`);
       return;
     }
 
@@ -306,20 +271,17 @@ const FileReceive: React.FC = () => {
     setProgress(0);
 
     try {
-      // Save the current download path for future use
       await saveDownloadPath(downloadPath);
 
-      // Invoke the Tauri command to receive file
-      const result = await invoke<string>('receive_file_command', {
+      logger.info('FileReceive', `Initiating download with code: ${fullCode}`);
+
+      await invoke<string>('receive_file_command', {
         ticket: fullCode,
         fileStoragePath: downloadPath,
-        verbose: false,
+        verbose: API_CONFIG.VERBOSE_MODE,
       });
-
-      // The results and progress will be handled by the event listeners
-      console.log('Command result:', result);
     } catch (error) {
-      console.error('Error receiving file:', error);
+      logger.error('FileReceive', 'Error receiving file', error);
       setStatus('error');
       setStatusMessage(`Error: ${error}`);
       setProgress(0);
@@ -328,7 +290,7 @@ const FileReceive: React.FC = () => {
 
   // Reset the form
   const handleReset = () => {
-    setCode(Array(6).fill(''));
+    setCode(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(''));
     setStatus('idle');
     setStatusMessage('');
     setProgress(0);
@@ -340,7 +302,7 @@ const FileReceive: React.FC = () => {
       if (inputRefs.current[0]) {
         inputRefs.current[0]?.focus();
       }
-    }, 100);
+    }, UI_CONFIG.INPUT_FOCUS_DELAY);
   };
 
   // Helper function to format bytes
@@ -505,7 +467,7 @@ const FileReceive: React.FC = () => {
               className="w-full flex items-center gap-2"
               onClick={handleReceive}
               disabled={
-                code.join('').length !== 6 ||
+                code.join('').length !== FILE_TRANSFER_CONFIG.CODE_LENGTH ||
                 !downloadPath ||
                 status === 'processing'
               }
@@ -523,22 +485,6 @@ const FileReceive: React.FC = () => {
                 </>
               )}
             </Button>
-
-            {/* Debug info - remove this after testing */}
-            <div className="text-xs bg-muted p-2 rounded mt-2 space-y-1 font-mono">
-              <div><strong>Debug Info:</strong></div>
-              <div>Android: {isAndroid ? 'Yes' : 'No'}</div>
-              <div>Code: "{code.join('')}" (len: {code.join('').length})</div>
-              <div>Path: {downloadPath ? `"${downloadPath}"` : '(empty)'}</div>
-              <div>Status: {status}</div>
-              <div>Disabled: {(code.join('').length !== 6 || !downloadPath || status === 'processing') ? 'YES' : 'NO'}</div>
-              <div>Disabled reasons:</div>
-              <div className="ml-4">
-                {code.join('').length !== 6 && <div>- Code not 6 chars</div>}
-                {!downloadPath && <div>- No download path</div>}
-                {status === 'processing' && <div>- Processing</div>}
-              </div>
-            </div>
 
             {(status === 'error' || status === 'success') && (
               <Button
