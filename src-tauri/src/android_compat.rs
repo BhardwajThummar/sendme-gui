@@ -68,7 +68,7 @@ pub mod android {
     }
 
     // Provide Android implementations using async/await
-    pub async fn send_file_minimal(file_path: String, verbose: bool) -> Result<String, String> {
+    pub async fn send_file_minimal(file_path: String, verbose: bool, _window: tauri::Window) -> Result<String, String> {
         let cfg = config();
         // Import necessary types
         use std::path::PathBuf;
@@ -92,7 +92,7 @@ pub mod android {
         };
 
         debug!("Android: Calling start_send");
-        let (ticket, router, _blobs_data_dir) = start_send(send_args).await.map_err(|e| {
+        let (ticket, router, _blobs_data_dir) = start_send(send_args, None).await.map_err(|e| {
             let err_msg = format!("start_send failed: {}", e);
             error!("Android: {}", err_msg);
             err_msg
@@ -278,6 +278,30 @@ pub mod android {
         Runtime::new()
             .map_err(|e| format!("Failed to create runtime: {}", e))?
             .block_on(stop_sharing_async())
+    }
+
+    pub async fn send_files_minimal(
+        file_paths: Vec<String>,
+        verbose: bool,
+        _window: tauri::Window,
+    ) -> Result<String, String> {
+        // For now, Android will just send the first file
+        // TODO: Implement proper multi-file support for Android
+        if file_paths.is_empty() {
+            return Err("No files provided".to_string());
+        }
+
+        if file_paths.len() == 1 {
+            return send_file_minimal(file_paths[0].clone(), verbose, _window).await;
+        }
+
+        // For multiple files, we could implement similar directory bundling logic
+        // For now, just send the first file with a warning
+        warn!(
+            "Android: Multiple files requested ({}), but only first file will be sent",
+            file_paths.len()
+        );
+        send_file_minimal(file_paths[0].clone(), verbose, _window).await
     }
 }
 

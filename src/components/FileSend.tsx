@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 
 interface FileInfo {
   name: string;
@@ -42,6 +43,13 @@ interface SendCompletedEvent {
   files_count: number;
 }
 
+interface ImportProgressEvent {
+  percentage: number;
+  current_file: string;
+  files_processed: number;
+  total_files: number;
+}
+
 const FileSend: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
   const [status, setStatus] = useState<
@@ -51,6 +59,11 @@ const FileSend: React.FC = () => {
   const [sendCode, setSendCode] = useState<string>("");
   const [isAndroid, setIsAndroid] = useState(false);
   const [importProgress, setImportProgress] = useState<number>(0);
+  const [importStatus, setImportStatus] = useState<{
+    currentFile: string;
+    filesProcessed: number;
+    totalFiles: number;
+  } | null>(null);
 
   // Live sharing stats when someone is downloading
   const [sharingStats, setSharingStats] = useState<{
@@ -59,6 +72,9 @@ const FileSend: React.FC = () => {
     speed: string;
     activeConnections: number;
   } | null>(null);
+
+  // Transfer progress percentage for progress bar
+  const [transferProgress, setTransferProgress] = useState<number>(0);
 
   useEffect(() => {
     if (typeof navigator !== "undefined") {
@@ -71,8 +87,13 @@ const FileSend: React.FC = () => {
 
       // Listen for import progress during file preparation
       unlisteners.push(
-        await listen<{ percentage: number }>("import_progress", (event) => {
+        await listen<ImportProgressEvent>("import_progress", (event) => {
           setImportProgress(event.payload.percentage);
+          setImportStatus({
+            currentFile: event.payload.current_file,
+            filesProcessed: event.payload.files_processed,
+            totalFiles: event.payload.total_files,
+          });
         })
       );
 
@@ -88,10 +109,11 @@ const FileSend: React.FC = () => {
         await listen<TransferProgressEvent>(
           "send_transfer_progress",
           (event) => {
-            const { bytes_transferred, total_bytes, speed_bytes_per_sec } =
+            const { bytes_transferred, total_bytes, speed_bytes_per_sec, percentage } =
               event.payload;
 
             setStatus("sharing");
+            setTransferProgress(percentage);
             setSharingStats({
               bytesTransferred: formatFileSize(bytes_transferred),
               totalBytes: formatFileSize(total_bytes),
@@ -221,11 +243,15 @@ const FileSend: React.FC = () => {
     setStatus("processing");
     setStatusMessage("Preparing your files...");
 
-    try {
-      const filePath = selectedFiles[0].path;
+    // Start background service for Android to keep transfer alive
+    startBackgroundService('send', selectedFiles.length);
 
-      const result = await invoke<string>("send_file_command", {
-        filePath: filePath,
+    try {
+      // Send all selected file paths
+      const filePaths = selectedFiles.map(f => f.path);
+
+      const result = await invoke<string>("send_files_command", {
+        filePaths: filePaths,
         verbose: API_CONFIG.VERBOSE_MODE,
       });
 
@@ -237,6 +263,8 @@ const FileSend: React.FC = () => {
       logger.error("FileSend", "Error sending files", error);
       setStatus("error");
       setStatusMessage(`Error: ${error}`);
+      // Stop service on error
+      stopBackgroundService();
     }
   };
 
@@ -295,10 +323,22 @@ const FileSend: React.FC = () => {
           </div>
 
           {status === "sharing" && sharingStats && (
-            <div className="mx-2 p-4 border border-primary rounded-lg bg-muted space-y-2">
+            <div className="mx-2 p-4 border border-primary rounded-lg bg-muted space-y-3">
               <h3 className="text-sm font-medium text-primary">
                 Live Transfer Stats
               </h3>
+
+              {/* Progress Bar */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-muted-foreground">Uploading...</span>
+                  <span className="font-medium text-primary">
+                    {Math.round(transferProgress)}%
+                  </span>
+                </div>
+                <Progress value={transferProgress} className="h-2" />
+              </div>
+
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <div className="text-muted-foreground">Progress</div>
@@ -441,15 +481,23 @@ const FileSend: React.FC = () => {
               <div className="flex justify-between items-center text-xs">
                 <span className="text-muted-foreground">
                   Preparing files...
+                  {importStatus && ` (${importStatus.filesProcessed}/${importStatus.totalFiles})`}
                 </span>
                 <span className="font-medium text-primary">
                   {Math.round(importProgress)}%
                 </span>
               </div>
               <Progress value={importProgress} className="h-2" />
-              <p className="text-xs text-center text-muted-foreground">
-                {statusMessage}
-              </p>
+              {importStatus && importStatus.currentFile && (
+                <p className="text-xs text-muted-foreground truncate">
+                  Processing: {importStatus.currentFile}
+                </p>
+              )}
+              {statusMessage && (
+                <p className="text-xs text-center text-muted-foreground">
+                  {statusMessage}
+                </p>
+              )}
             </div>
           )}
 

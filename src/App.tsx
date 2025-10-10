@@ -1,26 +1,23 @@
 import { useState } from 'react';
 import FileSend from './components/FileSend';
 import FileReceive from './components/FileReceive';
-import { invoke } from '@tauri-apps/api/core';
 import { ToastProvider } from './components/ui/toast';
-import { Upload, Download } from 'lucide-react';
+import { Upload, Download, Activity } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { logger } from './utils/logger';
+import { TransferProvider, useTransfer } from './context/TransferContext';
 
-function App() {
+function AppContent() {
   const [activeTab, setActiveTab] = useState<string>('send');
+  const { transferState } = useTransfer();
 
   const handleTabChange = (value: string) => {
     logger.debug('App', `Tab change requested: ${activeTab} → ${value}`);
-
     setActiveTab(value);
 
-    // Stop sharing in background if switching away from send
-    if (activeTab === 'send' && value !== 'send') {
-      invoke<string>('stop_sharing_command', { verbose: false })
-        .then(() => logger.info('App', 'File sharing stopped'))
-        .catch((error) => logger.error('App', 'Failed to stop sharing', error));
-    }
+    // Note: We no longer stop sharing when switching tabs
+    // This allows the transfer to continue in the background
+    // Users can manually stop sharing if needed
   };
 
   return (
@@ -28,10 +25,18 @@ function App() {
       <div className="min-h-screen bg-background flex flex-col">
         {/* Full-screen container with footer at bottom */}
         <div className="w-full flex flex-col flex-grow bg-background overflow-hidden">
-          <header className="flex items-center justify-center py-3 border-b">
+          <header className="flex items-center justify-center py-3 border-b relative">
             <h1 className="text-lg font-bold text-foreground">
               Secure File Transfer
             </h1>
+
+            {/* Active transfer indicator */}
+            {transferState.isSharing && activeTab !== 'send' && (
+              <div className="absolute right-4 flex items-center gap-2 text-xs text-primary">
+                <Activity className="h-4 w-4 animate-pulse" />
+                <span>Sharing active</span>
+              </div>
+            )}
           </header>
 
           <div className="border-b px-4 py-2">
@@ -48,6 +53,9 @@ function App() {
                 <div className="flex items-center justify-center gap-2">
                   <Upload className="h-4 w-4" />
                   <span className="font-medium">Send</span>
+                  {transferState.isSharing && activeTab !== 'send' && (
+                    <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                  )}
                 </div>
               </Button>
               <Button
@@ -82,6 +90,14 @@ function App() {
         </div>
       </div>
     </ToastProvider>
+  );
+}
+
+function App() {
+  return (
+    <TransferProvider>
+      <AppContent />
+    </TransferProvider>
   );
 }
 
