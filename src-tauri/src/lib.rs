@@ -69,18 +69,19 @@ fn get_temp_dir() -> std::path::PathBuf {
 
 #[tauri::command]
 async fn send_file_command(
+    window: Window,
     file_path: String,
     verbose: bool,
     _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        android_compat::android::send_file_minimal(file_path, verbose).await
+        android_compat::android::send_file_minimal(file_path, verbose, window).await
     }
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::send_file_minimal(file_path, verbose, _state.clone()).await {
+        match sendme::send_file_minimal(file_path, verbose, _state.clone(), window).await {
             Ok(ticket) => Ok(ticket),
             Err(_e) => {
                 // stop sharing if it fails
@@ -88,6 +89,31 @@ async fn send_file_command(
                 // Err(e.to_string())
                 // Emit error event if sending failed
                 Err(format!("Failed to send file"))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn send_files_command(
+    window: Window,
+    file_paths: Vec<String>,
+    verbose: bool,
+    _state: State<'_, SharedSenderState>,
+) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        android_compat::android::send_files_minimal(file_paths, verbose, window).await
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        match sendme::send_files_minimal(file_paths, verbose, _state.clone(), window).await {
+            Ok(ticket) => Ok(ticket),
+            Err(_e) => {
+                // stop sharing if it fails
+                let _e = sendme::stop_sharing(_state).await;
+                Err(format!("Failed to send files"))
             }
         }
     }
@@ -460,6 +486,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             send_file_command,
+            send_files_command,
             stop_sharing_command,
             receive_file_command,
             get_downloads_dir,

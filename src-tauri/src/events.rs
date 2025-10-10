@@ -34,6 +34,15 @@ pub struct SendCompletedEvent {
     pub files_count: u32,
 }
 
+// Event for file import/preparation progress
+#[derive(Clone, Serialize)]
+pub struct ImportProgressEvent {
+    pub percentage: f64,
+    pub current_file: String,
+    pub files_processed: usize,
+    pub total_files: usize,
+}
+
 // // Helper function to format file size in human-readable format
 // pub fn format_size(size: u64) -> String {
 //     const KB: u64 = 1024;
