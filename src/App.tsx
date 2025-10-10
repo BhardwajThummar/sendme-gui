@@ -6,6 +6,7 @@ import { Upload, Download, Activity } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { logger } from './utils/logger';
 import { TransferProvider, useTransfer } from './context/TransferContext';
+import { getVersionString } from './utils/version';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<string>('send');
@@ -85,7 +86,7 @@ function AppContent() {
           </main>
 
           <footer className="mt-auto text-center text-xs text-muted-foreground py-3 border-t">
-            <p>Secure File Transfer • Send files safely</p>
+            <p>Secure File Transfer • Send files safely • {getVersionString()}</p>
           </footer>
         </div>
       </div>
