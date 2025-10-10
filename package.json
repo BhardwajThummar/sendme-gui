@@ -11,7 +11,12 @@
     "postbuild": "bash ./scripts/create-installer.sh && bash ./scripts/create-dmg.sh",
     "android:dev": "tauri android dev",
     "android:build": "tauri android build",
-    "android:run": "tauri android run"
+    "android:run": "tauri android run",
+    "version": "bash ./scripts/version.sh",
+    "version:patch": "bash ./scripts/version.sh patch",
+    "version:minor": "bash ./scripts/version.sh minor",
+    "version:major": "bash ./scripts/version.sh major",
+    "version:check": "node -p \"'v' + require('./package.json').version\""
   },
   "dependencies": {
     "@radix-ui/react-tabs": "^1.1.11",
