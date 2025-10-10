@@ -442,6 +442,101 @@ pub async fn show_ingest_progress(
     Ok(())
 }
 
+/// Show ingest progress with Tauri window events
+pub async fn show_ingest_progress_with_window(
+    recv: async_channel::Receiver<ImportProgress>,
+    window: Option<tauri::Window>,
+    total_files: usize,
+) -> anyhow::Result<()> {
+    let mp = MultiProgress::new();
+    mp.set_draw_target(ProgressDrawTarget::stderr());
+    let op = mp.add(ProgressBar::hidden());
+    op.set_style(
+        ProgressStyle::default_spinner().template("{spinner:.green} [{elapsed_precise}] {msg}")?,
+    );
+
+    let mut names = BTreeMap::new();
+    let mut sizes = BTreeMap::new();
+    let mut pbs = BTreeMap::new();
+    let mut files_processed = 0;
+
+    loop {
+        let event = recv.recv().await;
+        match event {
+            Ok(ImportProgress::Found { id, name }) => {
+                names.insert(id, name.clone());
+
+                // Emit event to window
+                if let Some(ref win) = window {
+                    let _ = win.emit(
+                        "import_progress",
+                        crate::events::ImportProgressEvent {
+                            percentage: (files_processed as f64 / total_files as f64 * 100.0).min(100.0),
+                            current_file: name,
+                            files_processed,
+                            total_files,
+                        },
+                    );
+                }
+            }
+            Ok(ImportProgress::Size { id, size }) => {
+                sizes.insert(id, size);
+                let total_size = sizes.values().sum::<u64>();
+                op.set_message(format!(
+                    "{} Ingesting {} files, {}\n",
+                    style("[1/2]").bold().dim(),
+                    sizes.len(),
+                    HumanBytes(total_size)
+                ));
+                let name = names.get(&id).cloned().unwrap_or_default();
+                let pb = mp.add(ProgressBar::hidden());
+                pb.set_style(ProgressStyle::with_template(
+                    "{msg}{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes}",
+                )?.progress_chars("#>-"));
+                pb.set_message(format!("{} {}", style("[2/2]").bold().dim(), name));
+                pb.set_length(size);
+                pbs.insert(id, pb);
+            }
+            Ok(ImportProgress::OutboardProgress { id, offset }) => {
+                if let Some(pb) = pbs.get(&id) {
+                    pb.set_position(offset);
+                }
+            }
+            Ok(ImportProgress::OutboardDone { id, .. }) => {
+                // you are not guaranteed to get any OutboardProgress
+                if let Some(pb) = pbs.remove(&id) {
+                    pb.finish_and_clear();
+                }
+
+                files_processed += 1;
+
+                // Emit updated progress
+                if let Some(ref win) = window {
+                    let current_name = names.get(&id).cloned().unwrap_or_default();
+                    let _ = win.emit(
+                        "import_progress",
+                        crate::events::ImportProgressEvent {
+                            percentage: (files_processed as f64 / total_files as f64 * 100.0).min(100.0),
+                            current_file: current_name,
+                            files_processed,
+                            total_files,
+                        },
+                    );
+                }
+            }
+            Ok(ImportProgress::CopyProgress { .. }) => {
+                // we are not copying anything
+            }
+            Err(e) => {
+                op.set_message(format!("Error receiving progress: {e}"));
+                break;
+            }
+        }
+    }
+    op.finish_and_clear();
+    Ok(())
+}
+
 /// Import from a file or directory into the database.
 ///
 /// The returned tag always refers to a collection. If the input is a file, this
@@ -452,6 +547,15 @@ pub async fn show_ingest_progress(
 async fn import(
     path: PathBuf,
     db: impl iroh_blobs::store::Store,
+) -> anyhow::Result<(TempTag, u64, Collection)> {
+    import_with_window(path, db, None).await
+}
+
+/// Import with optional window for emitting progress events
+async fn import_with_window(
+    path: PathBuf,
+    db: impl iroh_blobs::store::Store,
+    window: Option<tauri::Window>,
 ) -> anyhow::Result<(TempTag, u64, Collection)> {
     let path = path.canonicalize()?;
     anyhow::ensure!(path.exists(), "path {} does not exist", path.display());
@@ -474,9 +578,18 @@ async fn import(
         })
         .filter_map(Result::transpose)
         .collect::<anyhow::Result<Vec<_>>>()?;
+    let total_files = data_sources.len();
     let (send, recv) = async_channel::bounded(32);
     let progress = iroh_blobs::util::progress::AsyncChannelProgressSender::new(send);
-    let show_progress = tokio::spawn(show_ingest_progress(recv));
+
+    // Clone window for progress task if available
+    let window_clone = window.clone();
+    let show_progress = if window_clone.is_some() {
+        tokio::spawn(show_ingest_progress_with_window(recv, window_clone, total_files))
+    } else {
+        tokio::spawn(show_ingest_progress(recv))
+    };
+
     // import all the files, using num_cpus workers, return names and temp tags
     let mut names_and_tags = futures_lite::stream::iter(data_sources)
         .map(|(name, path)| {
@@ -629,6 +742,163 @@ impl CustomEventSender for ClientStatus {
         };
         if let Some(msg) = msg {
             self.current.set_message(msg);
+        }
+    }
+}
+
+// Extended ClientStatus that can emit Tauri events
+#[derive(Clone)]
+struct TauriClientStatus {
+    current: Arc<ProgressBar>,
+    window: Option<tauri::Window>,
+    total_size: Arc<std::sync::Mutex<u64>>,
+    start_time: Arc<std::sync::Mutex<Option<Instant>>>,
+}
+
+// Manual Debug implementation since tauri::Window doesn't implement Debug
+impl std::fmt::Debug for TauriClientStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TauriClientStatus")
+            .field("window", &self.window.is_some())
+            .field("total_size", &self.total_size)
+            .field("start_time", &self.start_time)
+            .finish()
+    }
+}
+
+impl TauriClientStatus {
+    fn new(mp: &MultiProgress, window: Option<tauri::Window>, total_size: u64) -> Self {
+        let current = mp.add(ProgressBar::hidden());
+        current.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap(),
+        );
+        current.enable_steady_tick(Duration::from_millis(100));
+        current.set_message("waiting for requests");
+
+        Self {
+            current: current.into(),
+            window,
+            total_size: Arc::new(std::sync::Mutex::new(total_size)),
+            start_time: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
+impl Drop for TauriClientStatus {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.current) == 1 {
+            self.current.finish_and_clear();
+        }
+    }
+}
+
+impl CustomEventSender for TauriClientStatus {
+    fn send(&self, event: iroh_blobs::provider::Event) -> Boxed<()> {
+        self.try_send(event);
+        Box::pin(std::future::ready(()))
+    }
+
+    fn try_send(&self, event: provider::Event) {
+        tracing::info!("TauriClientStatus event: {:?}", event);
+
+        match &event {
+            provider::Event::ClientConnected { connection_id } => {
+                let msg = format!("{} got connection", connection_id);
+                self.current.set_message(msg.clone());
+
+                // Initialize start time
+                if let Ok(mut start) = self.start_time.lock() {
+                    *start = Some(Instant::now());
+                }
+
+                if let Some(ref window) = self.window {
+                    let _ = window.emit("send_transfer_started", ());
+                }
+            }
+            provider::Event::TransferBlobCompleted {
+                connection_id,
+                hash,
+                index,
+                size,
+                ..
+            } => {
+                let msg = format!(
+                    "{} transfer blob completed {} {} {}",
+                    connection_id,
+                    hash,
+                    index,
+                    HumanBytes(*size)
+                );
+                self.current.set_message(msg);
+
+                // Emit progress event
+                if let Some(ref window) = self.window {
+                    if let Ok(start) = self.start_time.lock() {
+                        if let Some(start_instant) = *start {
+                            let elapsed = start_instant.elapsed();
+                            let elapsed_ms = elapsed.as_millis() as u64;
+
+                            if let Ok(total_size) = self.total_size.lock() {
+                                // We can't track exact bytes transferred easily, but we can estimate
+                                // based on blob completion. For now, emit an event on each blob completion.
+                                let speed = if elapsed.as_secs_f64() > 0.0 {
+                                    (*size as f64 / elapsed.as_secs_f64()) as u64
+                                } else {
+                                    0
+                                };
+
+                                let _ = window.emit(
+                                    "send_transfer_progress",
+                                    crate::events::TransferProgressEvent {
+                                        bytes_transferred: *size,
+                                        total_bytes: *total_size,
+                                        percentage: (*size as f64 / *total_size as f64 * 100.0).min(100.0),
+                                        speed_bytes_per_sec: speed,
+                                        elapsed_ms,
+                                        eta_ms: 0, // Hard to estimate for sender
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            provider::Event::TransferCompleted {
+                connection_id,
+                stats,
+                ..
+            } => {
+                let msg = format!(
+                    "{} transfer completed {} {}",
+                    connection_id,
+                    stats.send.write_bytes.size,
+                    HumanDuration(stats.send.write_bytes.stats.duration)
+                );
+                self.current.set_message(msg);
+
+                if let Some(ref window) = self.window {
+                    if let Ok(total_size) = self.total_size.lock() {
+                        let _ = window.emit(
+                            "send_transfer_progress",
+                            crate::events::TransferProgressEvent {
+                                bytes_transferred: stats.send.write_bytes.size,
+                                total_bytes: *total_size,
+                                percentage: 100.0,
+                                speed_bytes_per_sec: 0,
+                                elapsed_ms: stats.send.write_bytes.stats.duration.as_millis() as u64,
+                                eta_ms: 0,
+                            },
+                        );
+                    }
+                }
+            }
+            provider::Event::TransferAborted { connection_id, .. } => {
+                let msg = format!("{} transfer aborted", connection_id);
+                self.current.set_message(msg);
+            }
+            _ => {}
         }
     }
 }
@@ -903,6 +1173,7 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
 // In your existing module (or in a new one), add the following:
 pub async fn start_send(
     args: SendArgs,
+    window: Option<tauri::Window>,
 ) -> anyhow::Result<(BlobTicket, iroh::protocol::Router, PathBuf)> {
     let cfg = config();
 
@@ -952,24 +1223,40 @@ pub async fn start_send(
     debug!("Binding endpoint");
     let endpoint = builder.bind().await?;
 
+    info!("Importing file: {:?}", args.path);
+    let path = args.path;
+    // Import first to get the size, which we'll need for progress tracking
+    // Use import_with_window to emit progress events
+    let db_store = iroh_blobs::store::fs::Store::load(&blobs_data_dir).await?;
+    let (temp_tag, size, collection) = import_with_window(path.clone(), db_store, window.clone()).await?;
+    info!("Import complete, size: {}", HumanBytes(size));
+    let hash = *temp_tag.hash();
+
     debug!("Creating blobs store");
-    let ps = SendStatus::new();
-    let blobs = Blobs::persistent(&blobs_data_dir)
-        .await?
-        .events(ps.new_client().into())
-        .build(&endpoint);
+    let blobs = if let Some(ref win) = window {
+        // Use TauriClientStatus for progress tracking
+        let mp = MultiProgress::new();
+        mp.set_draw_target(ProgressDrawTarget::stderr());
+        let client_status = TauriClientStatus::new(&mp, Some(win.clone()), size);
+
+        Blobs::persistent(&blobs_data_dir)
+            .await?
+            .events(client_status.into())
+            .build(&endpoint)
+    } else {
+        // Use regular SendStatus without window
+        let ps = SendStatus::new();
+        Blobs::persistent(&blobs_data_dir)
+            .await?
+            .events(ps.new_client().into())
+            .build(&endpoint)
+    };
 
     debug!("Building router");
     let router = iroh::protocol::Router::builder(endpoint)
         .accept(iroh_blobs::ALPN, blobs.clone())
         .spawn()
         .await?;
-
-    info!("Importing file: {:?}", args.path);
-    let path = args.path;
-    let (temp_tag, size, collection) = import(path.clone(), blobs.store().clone()).await?;
-    info!("Import complete, size: {}", HumanBytes(size));
-    let hash = *temp_tag.hash();
 
     // Wait for the endpoint to be ready.
     debug!("Waiting for relay initialization");
@@ -1012,6 +1299,7 @@ pub async fn send_file_minimal(
     file_path: String,
     verbose: bool,
     state: State<'_, SharedSenderState>,
+    window: tauri::Window,
 ) -> anyhow::Result<String> {
     // Construct a minimal SendArgs using the file_path and verbose flag.
     let send_args = SendArgs {
@@ -1026,8 +1314,8 @@ pub async fn send_file_minimal(
         },
     };
 
-    // Call our new start_send() which sets up sharing.
-    let (ticket, router, blobs_data_dir) = start_send(send_args).await?;
+    // Call our new start_send() which sets up sharing with progress tracking.
+    let (ticket, router, blobs_data_dir) = start_send(send_args, Some(window)).await?;
 
     info!("Sharing file with ticket: {}", ticket);
 
@@ -1044,6 +1332,95 @@ pub async fn send_file_minimal(
         Err(err) => Err(anyhow::anyhow!("Failed to create blob: {}", err)),
     }
     // Ok(ticket.to_string())
+}
+
+pub async fn send_files_minimal(
+    file_paths: Vec<String>,
+    verbose: bool,
+    state: State<'_, SharedSenderState>,
+    window: tauri::Window,
+) -> anyhow::Result<String> {
+    // If only one file, use the single file method
+    if file_paths.len() == 1 {
+        return send_file_minimal(file_paths[0].clone(), verbose, state, window).await;
+    }
+
+    // For multiple files, we need to create a temporary directory structure
+    // and import all files into it, then send that directory
+    let cfg = config();
+
+    // Create a temporary directory to hold links/copies of all files
+    let temp_collection_dir = CWD.join(format!(
+        "{}collection-{}",
+        cfg.storage.temp_dir_prefix,
+        rand::thread_rng().gen::<[u8; 8]>().iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    ));
+
+    tokio::fs::create_dir_all(&temp_collection_dir).await?;
+
+    // We'll create symlinks (or copies on Windows) to all the files in this directory
+    for (idx, file_path) in file_paths.iter().enumerate() {
+        let source = PathBuf::from(file_path);
+        if !source.exists() {
+            tokio::fs::remove_dir_all(&temp_collection_dir).await?;
+            anyhow::bail!("File not found: {}", file_path);
+        }
+
+        // Use the original filename, or a numbered fallback if there's no filename
+        let fallback_name = format!("file_{}", idx);
+        let file_name = source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&fallback_name);
+
+        let dest = temp_collection_dir.join(file_name);
+
+        // Try to create a symlink first (faster), fall back to copy if symlink fails
+        #[cfg(unix)]
+        {
+            if let Err(_) = tokio::fs::symlink(&source, &dest).await {
+                tokio::fs::copy(&source, &dest).await?;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::fs::copy(&source, &dest).await?;
+        }
+    }
+
+    // Now send the temporary collection directory
+    let send_args = SendArgs {
+        path: temp_collection_dir.clone(),
+        ticket_type: AddrInfoOptions::RelayAndAddresses,
+        common: CommonArgs {
+            magic_ipv4_addr: None,
+            magic_ipv6_addr: None,
+            format: Format::Hex,
+            verbose: if verbose { 1 } else { 0 },
+            relay: RelayModeOption::Default,
+        },
+    };
+
+    let (ticket, router, blobs_data_dir) = start_send(send_args, Some(window)).await?;
+
+    // Clean up the temporary collection directory
+    tokio::fs::remove_dir_all(&temp_collection_dir).await?;
+
+    info!("Sharing {} files with ticket: {}", file_paths.len(), ticket);
+
+    // Store the router and blobs_data_dir in global state
+    {
+        let mut sender_state = state.lock().unwrap();
+        sender_state.router = Some(router);
+        sender_state.blobs_data_dir = Some(blobs_data_dir);
+    }
+
+    // Save the blob to the database using create_blob
+    let blob = ticket.to_string();
+    match create_blob(blob).await {
+        Ok(code) => Ok(code),
+        Err(err) => Err(anyhow::anyhow!("Failed to create blob: {}", err)),
+    }
 }
 
 pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result<()> {
