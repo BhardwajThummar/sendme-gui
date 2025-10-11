@@ -16,11 +16,8 @@ use std::time::Instant;
 use std::{fs, path::Path, sync::Mutex};
 
 use config::config;
-#[cfg(not(target_os = "android"))]
-use dirs;
 use sender_state::{SenderState, SharedSenderState};
 use tauri::{Emitter, State, Window};
-use tauri_plugin_store;
 
 lazy_static::lazy_static! {
     static ref HOME_DIR: std::path::PathBuf = get_home_dir();
@@ -88,7 +85,7 @@ async fn send_file_command(
                 let _e = sendme::stop_sharing(_state).await;
                 // Err(e.to_string())
                 // Emit error event if sending failed
-                Err(format!("Failed to send file"))
+                Err("Failed to send file".to_string())
             }
         }
     }
@@ -113,7 +110,7 @@ async fn send_files_command(
             Err(_e) => {
                 // stop sharing if it fails
                 let _e = sendme::stop_sharing(_state).await;
-                Err(format!("Failed to send files"))
+                Err("Failed to send files".to_string())
             }
         }
     }
@@ -230,7 +227,7 @@ async fn receive_file_with_stats(
         let window_for_progress = window.clone();
 
         // Run the non-Send future in a blocking task.
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             // Run the original function inside the blocking task
             futures::executor::block_on(async {
                 // Call the new progress-aware function
@@ -273,9 +270,7 @@ async fn receive_file_with_stats(
             // Emit error event if download failed
             let _ = window.emit("download_error", e.to_string());
             e.to_string()
-        });
-
-        result
+        })
     }
 }
 
