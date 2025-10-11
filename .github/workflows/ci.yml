@@ -58,12 +58,12 @@ jobs:
       - name: Check TypeScript
         run: yarn tsc --noEmit
 
-      - name: Build frontend
-        run: yarn build
-
       - name: Check Rust formatting
         working-directory: src-tauri
         run: cargo fmt --all -- --check
+
+      - name: Build frontend
+        run: yarn build
 
       - name: Run Rust lints
         working-directory: src-tauri
@@ -114,6 +114,9 @@ jobs:
       - name: Check Rust formatting
         working-directory: src-tauri
         run: cargo fmt --all -- --check
+
+      - name: Build frontend
+        run: yarn build
 
       - name: Run Rust clippy
         working-directory: src-tauri
