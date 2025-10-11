@@ -1,0 +1,252 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `${{ steps.version.outputs.version }}`,
+              name: `SendMe GUI ${{ steps.version.outputs.version }}`,
+              body: 'Release notes will be added automatically',
+              draft: true,
+              prerelease: false
+            })
+            core.setOutput('upload_url', data.upload_url)
+            return data.id
+
+  build-desktop:
+    name: Build ${{ matrix.config.name }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            artifact_name: windows
+          - name: macOS (Intel)
+            os: macos-latest
+            rust_target: x86_64-apple-darwin
+            artifact_name: macos-intel
+          - name: macOS (Apple Silicon)
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+            artifact_name: macos-silicon
+          - name: Linux
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_name: linux
+
+    runs-on: ${{ matrix.config.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.config.rust_target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.config.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build frontend
+        run: yarn build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.config.rust_target != '' && format('--target {0}', matrix.config.rust_target) || '' }}
+
+  build-android:
+    name: Build Android
+    needs: create-release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;27.1.12297006"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> $GITHUB_ENV
+
+      - name: Install Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build frontend
+        run: yarn build
+
+      - name: Setup Android project
+        run: |
+          if [ ! -d "src-tauri/gen/android" ]; then
+            yarn tauri android init
+          fi
+
+      - name: Build Android APK
+        run: yarn tauri android build --apk
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          NDK_HOME: ${{ env.NDK_HOME }}
+
+      - name: Find and upload Android artifacts
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Find APK files
+            const apkDir = 'src-tauri/gen/android/app/build/outputs/apk';
+            const findApks = (dir) => {
+              const files = [];
+              if (fs.existsSync(dir)) {
+                fs.readdirSync(dir, { recursive: true }).forEach(file => {
+                  if (file.endsWith('.apk')) {
+                    files.push(path.join(dir, file));
+                  }
+                });
+              }
+              return files;
+            };
+
+            const apks = findApks(apkDir);
+            console.log('Found APKs:', apks);
+
+            // Upload each APK
+            for (const apkPath of apks) {
+              const fileName = path.basename(apkPath);
+              const assetName = `sendme-gui-${{ needs.create-release.outputs.version }}-${fileName}`;
+
+              const data = fs.readFileSync(apkPath);
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: ${{ needs.create-release.outputs.release_id }},
+                name: assetName,
+                data: data
+              });
+
+              console.log(`Uploaded ${assetName}`);
+            }
+
+  publish-release:
+    name: Publish Release
+    needs: [create-release, build-desktop, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              draft: false
+            })

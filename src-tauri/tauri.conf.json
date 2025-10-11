@@ -23,7 +23,7 @@
   },
   "productName": "sendme-gui-tauri-1",
   "mainBinaryName": "sendme-gui-tauri-1",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.sendme-gui-tauri-1.app",
   "plugins": {
     "dialog": null

@@ -68,6 +68,28 @@ yarn version 1.2.3
 
 For more details, see [VERSIONING.md](VERSIONING.md).
 
+## Releases
+
+The project uses GitHub Actions to automate multiplatform builds and releases. When you push a version tag, it automatically builds for:
+
+- **Windows** (x86_64)
+- **macOS** (Intel and Apple Silicon)
+- **Linux** (x86_64)
+- **Android** (Universal APK)
+
+To create a release:
+
+```bash
+# 1. Bump version
+yarn version:patch  # or minor/major
+
+# 2. Push tag to GitHub
+git push origin tauri-v2
+git push origin v0.1.0  # Replace with your version
+```
+
+GitHub Actions will automatically build and publish the release. See [.github/RELEASE.md](.github/RELEASE.md) for the complete release process.
+
 ## Project Structure
 
 ```
@@ -128,6 +150,7 @@ yarn prettier --write .
 
 - [VERSIONING.md](VERSIONING.md) - Version management guide
 - [CHANGELOG.md](CHANGELOG.md) - Release notes
+- [.github/RELEASE.md](.github/RELEASE.md) - Release process guide
 - [.env.example](.env.example) - Environment configuration
 
 ## Contributing
