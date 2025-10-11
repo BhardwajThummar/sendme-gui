@@ -471,7 +471,8 @@ pub async fn show_ingest_progress_with_window(
                     let _ = win.emit(
                         "import_progress",
                         crate::events::ImportProgressEvent {
-                            percentage: (files_processed as f64 / total_files as f64 * 100.0).min(100.0),
+                            percentage: (files_processed as f64 / total_files as f64 * 100.0)
+                                .min(100.0),
                             current_file: name,
                             files_processed,
                             total_files,
@@ -516,7 +517,8 @@ pub async fn show_ingest_progress_with_window(
                     let _ = win.emit(
                         "import_progress",
                         crate::events::ImportProgressEvent {
-                            percentage: (files_processed as f64 / total_files as f64 * 100.0).min(100.0),
+                            percentage: (files_processed as f64 / total_files as f64 * 100.0)
+                                .min(100.0),
                             current_file: current_name,
                             files_processed,
                             total_files,
@@ -585,7 +587,11 @@ async fn import_with_window(
     // Clone window for progress task if available
     let window_clone = window.clone();
     let show_progress = if window_clone.is_some() {
-        tokio::spawn(show_ingest_progress_with_window(recv, window_clone, total_files))
+        tokio::spawn(show_ingest_progress_with_window(
+            recv,
+            window_clone,
+            total_files,
+        ))
     } else {
         tokio::spawn(show_ingest_progress(recv))
     };
@@ -854,7 +860,8 @@ impl CustomEventSender for TauriClientStatus {
                                     crate::events::TransferProgressEvent {
                                         bytes_transferred: *size,
                                         total_bytes: *total_size,
-                                        percentage: (*size as f64 / *total_size as f64 * 100.0).min(100.0),
+                                        percentage: (*size as f64 / *total_size as f64 * 100.0)
+                                            .min(100.0),
                                         speed_bytes_per_sec: speed,
                                         elapsed_ms,
                                         eta_ms: 0, // Hard to estimate for sender
@@ -887,7 +894,8 @@ impl CustomEventSender for TauriClientStatus {
                                 total_bytes: *total_size,
                                 percentage: 100.0,
                                 speed_bytes_per_sec: 0,
-                                elapsed_ms: stats.send.write_bytes.stats.duration.as_millis() as u64,
+                                elapsed_ms: stats.send.write_bytes.stats.duration.as_millis()
+                                    as u64,
                                 eta_ms: 0,
                             },
                         );
@@ -1228,7 +1236,8 @@ pub async fn start_send(
     // Import first to get the size, which we'll need for progress tracking
     // Use import_with_window to emit progress events
     let db_store = iroh_blobs::store::fs::Store::load(&blobs_data_dir).await?;
-    let (temp_tag, size, collection) = import_with_window(path.clone(), db_store, window.clone()).await?;
+    let (temp_tag, size, collection) =
+        import_with_window(path.clone(), db_store, window.clone()).await?;
     info!("Import complete, size: {}", HumanBytes(size));
     let hash = *temp_tag.hash();
 
@@ -1353,7 +1362,11 @@ pub async fn send_files_minimal(
     let temp_collection_dir = CWD.join(format!(
         "{}collection-{}",
         cfg.storage.temp_dir_prefix,
-        rand::thread_rng().gen::<[u8; 8]>().iter().map(|b| format!("{:02x}", b)).collect::<String>()
+        rand::thread_rng()
+            .gen::<[u8; 8]>()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
     ));
 
     tokio::fs::create_dir_all(&temp_collection_dir).await?;

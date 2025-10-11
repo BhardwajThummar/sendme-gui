@@ -68,7 +68,11 @@ pub mod android {
     }
 
     // Provide Android implementations using async/await
-    pub async fn send_file_minimal(file_path: String, verbose: bool, _window: tauri::Window) -> Result<String, String> {
+    pub async fn send_file_minimal(
+        file_path: String,
+        verbose: bool,
+        _window: tauri::Window,
+    ) -> Result<String, String> {
         let cfg = config();
         // Import necessary types
         use std::path::PathBuf;
