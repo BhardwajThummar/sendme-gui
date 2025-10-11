@@ -85,12 +85,9 @@ impl Default for PlatformConfig {
             android_download_path: env_or_default("ANDROID_DOWNLOAD_PATH", "/sdcard/Download"),
             android_app_data_path: env_or_default(
                 "ANDROID_APP_DATA_PATH",
-                "/data/data/com.sendme_gui_tauri_1.app/files",
+                "/data/data/com.sendme_gui.app/files",
             ),
-            android_package_name: env_or_default(
-                "ANDROID_PACKAGE_NAME",
-                "com.sendme_gui_tauri_1.app",
-            ),
+            android_package_name: env_or_default("ANDROID_PACKAGE_NAME", "com.sendme_gui.app"),
             sdcard_fallback_path: env_or_default("SDCARD_FALLBACK_PATH", "/sdcard"),
         }
     }

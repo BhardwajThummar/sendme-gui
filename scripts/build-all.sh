@@ -16,4 +16,4 @@ echo "Creating DMG file..."
 ./create-dmg.sh
 
 echo "Build process completed!"
-echo "DMG file is ready at: ./sendme-gui-tauri-1.dmg"
+echo "DMG file is ready at: ./sendme-gui.dmg"
