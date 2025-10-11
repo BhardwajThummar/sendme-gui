@@ -126,6 +126,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTFLAGS: "-A dead_code"
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.config.rust_target != '' && format('--target {0}', matrix.config.rust_target) || '' }}
@@ -190,6 +191,7 @@ jobs:
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           NDK_HOME: ${{ env.NDK_HOME }}
+          RUSTFLAGS: "-A dead_code"
 
       - name: Find and upload Android artifacts
         uses: actions/github-script@v7
