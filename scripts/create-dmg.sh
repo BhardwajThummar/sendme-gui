@@ -7,7 +7,7 @@
 TEMP_DIR=$(mktemp -d)
 
 # Copy the pkg installer to the temp directory
-cp ./installer/sendme-gui-tauri-1.pkg "$TEMP_DIR"
+cp ./installer/sendme-gui.pkg "$TEMP_DIR"
 
 # Copy any additional files like license, readme, etc.
 # cp ./LICENSE.txt "$TEMP_DIR"
@@ -20,13 +20,13 @@ create-dmg \
   --window-pos 200 120 \
   --window-size 800 400 \
   --icon-size 100 \
-  --icon "sendme-gui-tauri-1.pkg" 200 190 \
-  --hide-extension "sendme-gui-tauri-1.pkg" \
+  --icon "sendme-gui.pkg" 200 190 \
+  --hide-extension "sendme-gui.pkg" \
   --app-drop-link 600 185 \
-  "./sendme-gui-tauri-1.dmg" \
+  "./sendme-gui.dmg" \
   "$TEMP_DIR"
 
 # Clean up
 rm -rf "$TEMP_DIR"
 
-echo "DMG created at ./sendme-gui-tauri-1.dmg"
+echo "DMG created at ./sendme-gui.dmg"

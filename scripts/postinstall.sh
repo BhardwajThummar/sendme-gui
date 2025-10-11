@@ -3,7 +3,7 @@
 # This script will run after the app is installed from the DMG
 
 # Path to the app executable
-APP_PATH="/Applications/sendme-gui-tauri-1.app/Contents/MacOS/sendme-gui-tauri-1"
+APP_PATH="/Applications/sendme-gui.app/Contents/MacOS/sendme-gui"
 
 # Check if the app exists
 if [ ! -f "$APP_PATH" ]; then
@@ -25,5 +25,5 @@ chmod -R 755 ~/.config/iroh
 chown -R $USER ~/.local/share/iroh
 chown -R $USER ~/.config/iroh
 
-echo "Successfully set permissions for sendme-gui-tauri-1"
+echo "Successfully set permissions for sendme-gui"
 exit 0

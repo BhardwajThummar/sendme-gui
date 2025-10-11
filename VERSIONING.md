@@ -18,12 +18,14 @@ Example: 1.2.3
 ## Quick Start
 
 ### Check Current Version
+
 ```bash
 yarn version:check
 # Output: v0.1.0
 ```
 
 ### Bump Version
+
 ```bash
 # Bump patch version (0.1.0 -> 0.1.1)
 yarn version:patch
@@ -43,6 +45,7 @@ yarn version 1.5.0
 The [scripts/version.sh](scripts/version.sh) script automates version management:
 
 ### Features
+
 - ✅ Syncs version across all files (package.json, Cargo.toml, tauri.conf.json)
 - ✅ Updates CHANGELOG.md automatically
 - ✅ Creates git commits and tags
@@ -53,36 +56,40 @@ The [scripts/version.sh](scripts/version.sh) script automates version management
 ### Usage Examples
 
 **Basic version bump:**
+
 ```bash
 ./scripts/version.sh patch
 ```
 
 **Preview changes without applying:**
+
 ```bash
 ./scripts/version.sh minor --dry-run
 ```
 
 **Skip git operations:**
+
 ```bash
 ./scripts/version.sh patch --no-git
 ```
 
 **Set specific version:**
+
 ```bash
 ./scripts/version.sh 2.0.0
 ```
 
 ### Script Options
 
-| Option | Description |
-|--------|-------------|
-| `patch` | Bump patch version (1.2.3 → 1.2.4) |
-| `minor` | Bump minor version (1.2.3 → 1.3.0) |
-| `major` | Bump major version (1.2.3 → 2.0.0) |
-| `X.Y.Z` | Set specific version |
-| `--dry-run` | Preview changes without applying |
-| `--no-git` | Skip git commit and tag creation |
-| `-h, --help` | Show help message |
+| Option       | Description                        |
+| ------------ | ---------------------------------- |
+| `patch`      | Bump patch version (1.2.3 → 1.2.4) |
+| `minor`      | Bump minor version (1.2.3 → 1.3.0) |
+| `major`      | Bump major version (1.2.3 → 2.0.0) |
+| `X.Y.Z`      | Set specific version               |
+| `--dry-run`  | Preview changes without applying   |
+| `--no-git`   | Skip git commit and tag creation   |
+| `-h, --help` | Show help message                  |
 
 ## Files Synchronized
 
@@ -96,26 +103,34 @@ The version management system automatically updates these files:
 ## Changelog Management
 
 ### Structure
+
 The [CHANGELOG.md](CHANGELOG.md) follows the [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
 ## [Unreleased]
+
 ### Added
+
 - New features go here
 
 ### Changed
+
 - Changes to existing functionality
 
 ### Fixed
+
 - Bug fixes
 
 ## [1.2.0] - 2025-01-15
+
 ### Added
+
 - Feature X
 - Feature Y
 ```
 
 ### Change Categories
+
 - **Added**: New features
 - **Changed**: Changes in existing functionality
 - **Deprecated**: Soon-to-be removed features
@@ -124,6 +139,7 @@ The [CHANGELOG.md](CHANGELOG.md) follows the [Keep a Changelog](https://keepacha
 - **Security**: Security-related changes
 
 ### Workflow
+
 1. As you develop, add changes under `[Unreleased]` section
 2. When ready to release, run the version script
 3. Script automatically converts `[Unreleased]` to `[X.Y.Z] - DATE`
@@ -131,19 +147,24 @@ The [CHANGELOG.md](CHANGELOG.md) follows the [Keep a Changelog](https://keepacha
 ## Release Workflow
 
 ### 1. Update Changelog
+
 Before bumping version, ensure CHANGELOG.md has all changes listed under `[Unreleased]`:
 
 ```markdown
 ## [Unreleased]
+
 ### Added
+
 - New file transfer progress indicator
 - Android notification support
 
 ### Fixed
+
 - Connection timeout on slow networks
 ```
 
 ### 2. Bump Version
+
 Choose the appropriate version bump:
 
 ```bash
@@ -158,18 +179,21 @@ yarn version:major
 ```
 
 The script will:
+
 - Update all version files
 - Update CHANGELOG.md (convert Unreleased → version)
 - Create a git commit: `chore(release): bump version to X.Y.Z`
 - Create a git tag: `vX.Y.Z`
 
 ### 3. Review Changes
+
 ```bash
 git log -1 --stat
 git show vX.Y.Z
 ```
 
 ### 4. Build and Test
+
 ```bash
 # Build the application
 yarn build
@@ -182,6 +206,7 @@ yarn android:build
 ```
 
 ### 5. Push to Remote
+
 ```bash
 # Push commit and tags
 git push origin tauri-v2
@@ -192,6 +217,7 @@ git push origin tauri-v2 --tags
 ```
 
 ### 6. Create GitHub Release
+
 After pushing tags, create a GitHub release:
 
 1. Go to GitHub repository → Releases → Draft new release
@@ -205,10 +231,11 @@ After pushing tags, create a GitHub release:
 The application displays the current version in the footer.
 
 ### Implementation
+
 Located in [src/utils/version.ts](src/utils/version.ts):
 
 ```typescript
-import { getVersionString } from './utils/version';
+import { getVersionString } from "./utils/version";
 
 // Returns "v1.2.3"
 const version = getVersionString();
@@ -217,7 +244,7 @@ const version = getVersionString();
 ### Available Utilities
 
 ```typescript
-import VERSION from './utils/version';
+import VERSION from "./utils/version";
 
 // Get full version string
 VERSION.full; // "1.2.3"
@@ -235,7 +262,7 @@ VERSION.isDev; // true if version starts with 0.
 VERSION.getFullInfo();
 // {
 //   version: "1.2.3",
-//   name: "sendme-gui-tauri-1",
+//   name: "sendme-gui",
 //   isDevelopment: false,
 //   buildDate: "2025-01-15T10:30:00.000Z"
 // }
@@ -246,6 +273,7 @@ VERSION.getFullInfo();
 ### When to Bump Versions
 
 #### Patch (X.Y.1)
+
 - Bug fixes
 - Performance improvements
 - Documentation updates
@@ -253,19 +281,23 @@ VERSION.getFullInfo();
 - Security patches
 
 #### Minor (X.1.0)
+
 - New features (backward compatible)
 - New API endpoints
 - UI enhancements
 - Deprecations
 
 #### Major (1.0.0)
+
 - Breaking changes
 - Removed features
 - Incompatible API changes
 - Major redesigns
 
 ### Pre-Release Versions
+
 For beta/alpha releases, use version format with suffix:
+
 ```
 1.0.0-alpha.1
 1.0.0-beta.1
@@ -273,11 +305,13 @@ For beta/alpha releases, use version format with suffix:
 ```
 
 To set pre-release version:
+
 ```bash
 ./scripts/version.sh 1.0.0-beta.1
 ```
 
 ### Version 0.x.x
+
 - Versions starting with `0.` indicate early development
 - Breaking changes can occur in minor versions
 - Use `0.x.x` until the API is stable
@@ -285,14 +319,17 @@ To set pre-release version:
 ## Git Tags
 
 ### Format
+
 All version tags follow the format: `vX.Y.Z`
 
 Examples:
+
 - `v1.0.0`
 - `v1.2.3`
 - `v2.0.0-beta.1`
 
 ### List Tags
+
 ```bash
 # List all tags
 git tag -l
@@ -302,6 +339,7 @@ git tag -l -n
 ```
 
 ### Delete Tags
+
 ```bash
 # Delete local tag
 git tag -d v1.2.3
@@ -313,13 +351,14 @@ git push origin :refs/tags/v1.2.3
 ## CI/CD Integration
 
 ### GitHub Actions Example
+
 ```yaml
 name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   release:
@@ -343,6 +382,7 @@ jobs:
 ## Troubleshooting
 
 ### Version Mismatch
+
 If versions are out of sync across files:
 
 ```bash
@@ -351,6 +391,7 @@ If versions are out of sync across files:
 ```
 
 ### Uncommitted Changes
+
 The script requires a clean working directory:
 
 ```bash
@@ -363,6 +404,7 @@ git commit -m "feat: your changes"
 ```
 
 ### Failed Tag Creation
+
 If tag already exists:
 
 ```bash
@@ -384,6 +426,7 @@ git push origin :refs/tags/v1.2.3
 ## Questions?
 
 For questions or issues with the versioning system:
+
 1. Check this documentation
 2. Review [CHANGELOG.md](CHANGELOG.md)
 3. Check [scripts/version.sh](scripts/version.sh) script
