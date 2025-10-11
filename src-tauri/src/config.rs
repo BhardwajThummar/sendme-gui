@@ -9,7 +9,8 @@ use std::sync::OnceLock;
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 
 /// Application configuration structure
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct AppConfig {
     /// Platform configuration
     pub platform: PlatformConfig,
@@ -25,6 +26,7 @@ pub struct AppConfig {
 
 /// Platform-specific configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PlatformConfig {
     /// Android default download path
     pub android_download_path: String,
@@ -38,6 +40,7 @@ pub struct PlatformConfig {
 
 /// API configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ApiConfig {
     /// Base URL for API calls
     pub base_url: String,
@@ -58,6 +61,7 @@ pub struct StorageConfig {
 
 /// Network configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NetworkConfig {
     /// Router shutdown timeout in seconds
     pub router_shutdown_timeout_secs: u64,
@@ -67,23 +71,12 @@ pub struct NetworkConfig {
 
 /// Environment configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct EnvConfig {
     /// Whether running in debug mode
     pub is_debug: bool,
     /// Whether running in production
     pub is_production: bool,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            platform: PlatformConfig::default(),
-            api: ApiConfig::default(),
-            storage: StorageConfig::default(),
-            network: NetworkConfig::default(),
-            env: EnvConfig::default(),
-        }
-    }
 }
 
 impl Default for PlatformConfig {

@@ -546,6 +546,7 @@ pub async fn show_ingest_progress_with_window(
 ///
 /// If the input is a directory, the collection contains all the files in the
 /// directory.
+#[allow(dead_code)]
 async fn import(
     path: PathBuf,
     db: impl iroh_blobs::store::Store,
@@ -911,6 +912,7 @@ impl CustomEventSender for TauriClientStatus {
     }
 }
 
+#[allow(dead_code)]
 fn make_download_progress() -> ProgressBar {
     let pb = ProgressBar::hidden();
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -952,7 +954,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
     info!("Creating blob using BASE_URL: {}", cfg.api.base_url);
 
     let response = client
-        .post(&format!("{}/api/code/", cfg.api.base_url))
+        .post(format!("{}/api/code/", cfg.api.base_url))
         .json(&payload)
         .send()
         .await?
@@ -982,6 +984,7 @@ pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     Ok(response.blobs)
 }
 
+#[allow(dead_code)]
 pub async fn show_download_progress(
     recv: async_channel::Receiver<DownloadProgress>,
     total_size: u64,
@@ -1084,6 +1087,7 @@ fn show_get_error(e: anyhow::Error) -> anyhow::Error {
     e
 }
 
+#[allow(dead_code)]
 pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result<()> {
     let cfg = config();
     let ticket = args.ticket;
@@ -1391,7 +1395,7 @@ pub async fn send_files_minimal(
         // Try to create a symlink first (faster), fall back to copy if symlink fails
         #[cfg(unix)]
         {
-            if let Err(_) = tokio::fs::symlink(&source, &dest).await {
+            if (tokio::fs::symlink(&source, &dest).await).is_err() {
                 tokio::fs::copy(&source, &dest).await?;
             }
         }
@@ -1465,6 +1469,7 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn receive_file_minimal(
     ticket: String,
     file_storage_path: String,
@@ -1486,7 +1491,7 @@ pub async fn receive_file_minimal(
 
     // Construct a minimal ReceiveArgs using the ticket and verbose flag.
     let receive_args = ReceiveArgs {
-        ticket: ticket,
+        ticket,
         common: CommonArgs {
             magic_ipv4_addr: None,
             magic_ipv6_addr: None,
