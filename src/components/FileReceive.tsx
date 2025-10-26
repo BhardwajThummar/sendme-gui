@@ -23,6 +23,8 @@ import {
 import React, { useEffect, useRef, useState } from "react";
 import { getDownloadsFolderPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
+import { isAndroid, openAndroidDirectoryPicker } from "@/utils/androidPicker";
+import { formatPathForDisplay } from "@/utils/pathFormatter";
 
 // Define types for download events
 interface DownloadCompletedEvent {
@@ -293,13 +295,42 @@ const FileReceive: React.FC = () => {
 
   const handleBrowse = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Select Download Location",
-      });
+      let selected: string | null = null;
 
-      if (selected && !Array.isArray(selected)) {
+      if (isAndroid()) {
+        // On Android, use the custom directory picker
+        const uri = await openAndroidDirectoryPicker();
+        if (!uri) {
+          return; // User cancelled
+        }
+
+        // Resolve the directory URI to get the local directory path
+        if (!window.FileResolverPlugin) {
+          throw new Error('FileResolverPlugin not available');
+        }
+
+        const response = JSON.parse(window.FileResolverPlugin.resolveDirectoryToPath(uri));
+
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to resolve directory');
+        }
+
+        selected = response.path;
+        logger.info("FileReceive", `Resolved Android directory to: ${selected}`);
+      } else {
+        // Desktop: use Tauri dialog
+        const result = await open({
+          directory: true,
+          multiple: false,
+          title: "Select Download Location",
+        });
+
+        if (result && !Array.isArray(result)) {
+          selected = result;
+        }
+      }
+
+      if (selected) {
         setDownloadPath(selected);
         await saveDownloadPath(selected);
         logger.info("FileReceive", `Download path updated to: ${selected}`);
@@ -517,7 +548,7 @@ const FileReceive: React.FC = () => {
             </div>
             {downloadPath && (
               <p className="text-xs text-muted-foreground">
-                Files will be saved to: {downloadPath}
+                Files will be saved to: {formatPathForDisplay(downloadPath)}
               </p>
             )}
             {!downloadPath && (

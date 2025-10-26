@@ -17,6 +17,51 @@ pub mod android {
     lazy_static! {
         static ref ANDROID_ROUTER: Mutex<Option<iroh::protocol::Router>> = Mutex::new(None);
         static ref ANDROID_BLOBS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+        static ref BACKGROUND_SERVICE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    }
+
+    /// Start the Android foreground service to keep the app running in background
+    pub fn start_background_service(window: &tauri::Window) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        use tauri::Emitter;
+
+        if BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst) {
+            debug!("Android: Background service already running");
+            return Ok(());
+        }
+
+        info!("Android: Starting foreground service for background execution");
+
+        // Emit an event that the frontend will listen to and start the service
+        let _ = window.emit("start-background-service", ());
+
+        BACKGROUND_SERVICE_ACTIVE.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Stop the Android foreground service
+    pub fn stop_background_service(window: &tauri::Window) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        use tauri::Emitter;
+
+        if !BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst) {
+            debug!("Android: Background service not running");
+            return Ok(());
+        }
+
+        info!("Android: Stopping foreground service");
+
+        // Emit an event that the frontend will listen to and stop the service
+        let _ = window.emit("stop-background-service", ());
+
+        BACKGROUND_SERVICE_ACTIVE.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Check if background service is active
+    pub fn is_background_service_active() -> bool {
+        use std::sync::atomic::Ordering;
+        BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst)
     }
 
     // Android-specific path helper
@@ -71,11 +116,12 @@ pub mod android {
     pub async fn send_file_minimal(
         file_path: String,
         verbose: bool,
-        _window: tauri::Window,
+        window: tauri::Window,
     ) -> Result<String, String> {
         let cfg = config();
         // Import necessary types
         use std::path::PathBuf;
+        use tauri::Emitter;
 
         use crate::sendme::{
             create_blob, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
@@ -83,8 +129,11 @@ pub mod android {
 
         info!("Android: Starting send_file_minimal for: {}", file_path);
 
+        // Start the foreground service to keep app alive during transfer
+        let _ = start_background_service(&window);
+
         let send_args = SendArgs {
-            path: PathBuf::from(file_path),
+            path: PathBuf::from(file_path.clone()),
             ticket_type: AddrInfoOptions::RelayAndAddresses,
             common: CommonArgs {
                 magic_ipv4_addr: None,
@@ -96,7 +145,16 @@ pub mod android {
         };
 
         debug!("Android: Calling start_send");
-        let (ticket, router, _blobs_data_dir) = start_send(send_args, None).await.map_err(|e| {
+
+        // Emit initial progress event
+        let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
+            percentage: 0.0,
+            current_file: file_path.clone(),
+            files_processed: 0,
+            total_files: 1,
+        });
+
+        let (ticket, router, _blobs_data_dir) = start_send(send_args, Some(window.clone())).await.map_err(|e| {
             let err_msg = format!("start_send failed: {}", e);
             error!("Android: {}", err_msg);
             err_msg
@@ -105,6 +163,14 @@ pub mod android {
         info!("Android: Ticket generated successfully");
         let blob = ticket.to_string();
         debug!("Android: Blob/ticket string length: {}", blob.len());
+
+        // Emit progress - file preparation complete
+        let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
+            percentage: 50.0,
+            current_file: file_path.clone(),
+            files_processed: 1,
+            total_files: 1,
+        });
 
         // Store router and data dir in global state to keep them alive BEFORE making HTTP request
         {
@@ -131,6 +197,23 @@ pub mod android {
         match result {
             Ok(Ok(code)) => {
                 info!("Android: Blob created successfully with code: {}", code);
+
+                // Emit completion event
+                let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
+                    percentage: 100.0,
+                    current_file: file_path,
+                    files_processed: 1,
+                    total_files: 1,
+                });
+
+                let _ = window.emit("send_completed", crate::events::SendCompletedEvent {
+                    success: true,
+                    message: "Files prepared successfully".to_string(),
+                    elapsed_time_ms: 0,
+                    total_bytes: 0,
+                    files_count: 1,
+                });
+
                 Ok(code)
             }
             Ok(Err(err)) => {
@@ -153,77 +236,16 @@ pub mod android {
         ticket: String,
         file_storage_path: String,
         verbose: bool,
+        window: tauri::Window,
     ) -> Result<String, String> {
-        let cfg = config();
-        use std::{str::FromStr, time::Duration};
+        use crate::sendme::receive_file_with_progress;
 
-        use iroh_blobs::ticket::BlobTicket;
-
-        use crate::sendme::{get_blob, receive, CommonArgs, Format, ReceiveArgs, RelayModeOption};
-
-        info!("Android: Starting receive_file_minimal");
+        info!("Android: Starting receive_file_minimal with progress tracking");
         debug!("Android: Ticket code: {}", ticket);
         debug!("Android: Storage path: {}", file_storage_path);
 
-        // Get blob from API with timeout
-        info!("Android: Fetching blob from API");
-        let blob_result = tokio::time::timeout(
-            Duration::from_secs(cfg.network.http_timeout_secs),
-            get_blob(ticket),
-        )
-        .await;
-
-        let blob = match blob_result {
-            Ok(Ok(blob)) => {
-                info!("Android: Successfully fetched blob from API");
-                blob
-            }
-            Ok(Err(err)) => {
-                let err_msg = format!("Failed to get blob from API: {}", err);
-                error!("Android: {}", err_msg);
-                return Err(err_msg);
-            }
-            Err(_) => {
-                let err_msg = format!(
-                    "Timeout: get_blob took longer than {} seconds",
-                    cfg.network.http_timeout_secs
-                );
-                error!("Android: {}", err_msg);
-                return Err(err_msg);
-            }
-        };
-
-        if blob.is_empty() {
-            let err_msg = "Received empty blob array from API".to_string();
-            error!("Android: {}", err_msg);
-            return Err(err_msg);
-        }
-
-        debug!("Android: Parsing blob ticket");
-        let parsed_ticket = BlobTicket::from_str(&blob[0]).map_err(|e| {
-            let err_msg = format!("Failed to parse blob ticket: {}", e);
-            error!("Android: {}", err_msg);
-            err_msg
-        })?;
-        debug!("Android: Ticket parsed successfully");
-
-        // Construct ReceiveArgs with the parsed ticket
-        let receive_args = ReceiveArgs {
-            ticket: parsed_ticket,
-            common: CommonArgs {
-                magic_ipv4_addr: None,
-                magic_ipv6_addr: None,
-                format: Format::Hex,
-                verbose: if verbose { 1 } else { 0 },
-                relay: RelayModeOption::Default,
-            },
-        };
-
-        info!("Android: Starting file download");
-        // Call the actual receive function directly (not the wrapper)
-        let result = receive(receive_args, file_storage_path).await;
-
-        match &result {
+        // Use the desktop's progress-aware receive function
+        match receive_file_with_progress(ticket, file_storage_path, verbose, window).await {
             Ok(_) => {
                 info!("Android: File received successfully");
                 Ok("success".to_string())
@@ -287,7 +309,7 @@ pub mod android {
     pub async fn send_files_minimal(
         file_paths: Vec<String>,
         verbose: bool,
-        _window: tauri::Window,
+        window: tauri::Window,
     ) -> Result<String, String> {
         // For now, Android will just send the first file
         // TODO: Implement proper multi-file support for Android
@@ -296,7 +318,7 @@ pub mod android {
         }
 
         if file_paths.len() == 1 {
-            return send_file_minimal(file_paths[0].clone(), verbose, _window).await;
+            return send_file_minimal(file_paths[0].clone(), verbose, window).await;
         }
 
         // For multiple files, we could implement similar directory bundling logic
@@ -305,7 +327,7 @@ pub mod android {
             "Android: Multiple files requested ({}), but only first file will be sent",
             file_paths.len()
         );
-        send_file_minimal(file_paths[0].clone(), verbose, _window).await
+        send_file_minimal(file_paths[0].clone(), verbose, window).await
     }
 }
 
