@@ -23,7 +23,7 @@
   },
   "productName": "sendme-gui",
   "mainBinaryName": "sendme-gui",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "identifier": "com.sendme-gui.app",
   "plugins": {
     "dialog": null

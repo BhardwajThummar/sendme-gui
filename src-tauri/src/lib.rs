@@ -78,7 +78,8 @@ async fn send_file_command(
 
     #[cfg(target_os = "android")]
     {
-        let result = android_compat::android::send_file_minimal(file_path, verbose, window.clone()).await;
+        let result =
+            android_compat::android::send_file_minimal(file_path, verbose, window.clone()).await;
         // Keep background mode enabled even after success to maintain the connection
         if result.is_err() {
             background_manager::disable_background_mode_with_window(&window);
@@ -117,7 +118,8 @@ async fn send_files_command(
 
     #[cfg(target_os = "android")]
     {
-        let result = android_compat::android::send_files_minimal(file_paths, verbose, window.clone()).await;
+        let result =
+            android_compat::android::send_files_minimal(file_paths, verbose, window.clone()).await;
         // Keep background mode enabled even after success to maintain the connection
         if result.is_err() {
             background_manager::disable_background_mode_with_window(&window);
@@ -127,7 +129,8 @@ async fn send_files_command(
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::send_files_minimal(file_paths, verbose, _state.clone(), window.clone()).await {
+        match sendme::send_files_minimal(file_paths, verbose, _state.clone(), window.clone()).await
+        {
             Ok(ticket) => {
                 // Keep background mode enabled to maintain the connection
                 Ok(ticket)
@@ -143,7 +146,10 @@ async fn send_files_command(
 }
 
 #[tauri::command]
-async fn stop_sharing_command(window: Window, _state: State<'_, SharedSenderState>) -> Result<(), String> {
+async fn stop_sharing_command(
+    window: Window,
+    _state: State<'_, SharedSenderState>,
+) -> Result<(), String> {
     // Disable background mode when stopping sharing (with window for Android service)
     background_manager::disable_background_mode_with_window(&window);
 
@@ -497,7 +503,11 @@ fn cleanup_sendme_dirs() {
             logger::info!("Cleaning up Android Temp directory: {}", temp_dir.display());
             match std::fs::remove_dir_all(&temp_dir) {
                 Ok(_) => logger::info!("Removed Temp directory: {}", temp_dir.display()),
-                Err(e) => logger::error!("Failed to remove Temp directory {}: {}", temp_dir.display(), e),
+                Err(e) => logger::error!(
+                    "Failed to remove Temp directory {}: {}",
+                    temp_dir.display(),
+                    e
+                ),
             }
         } else {
             logger::error!("Could not determine the Temp directory for cleanup");
@@ -519,9 +529,15 @@ fn cleanup_sendme_dirs() {
                                 let path = entry.path();
                                 if path.is_dir() {
                                     match std::fs::remove_dir_all(&path) {
-                                        Ok(_) => logger::info!("Removed directory: {}", path.display()),
+                                        Ok(_) => {
+                                            logger::info!("Removed directory: {}", path.display())
+                                        }
                                         Err(e) => {
-                                            logger::error!("Failed to remove {}: {}", path.display(), e)
+                                            logger::error!(
+                                                "Failed to remove {}: {}",
+                                                path.display(),
+                                                e
+                                            )
                                         }
                                     }
                                 }
