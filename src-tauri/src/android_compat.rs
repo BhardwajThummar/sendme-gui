@@ -17,7 +17,8 @@ pub mod android {
     lazy_static! {
         static ref ANDROID_ROUTER: Mutex<Option<iroh::protocol::Router>> = Mutex::new(None);
         static ref ANDROID_BLOBS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-        static ref BACKGROUND_SERVICE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        static ref BACKGROUND_SERVICE_ACTIVE: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
     }
 
     /// Start the Android foreground service to keep the app running in background
@@ -147,14 +148,19 @@ pub mod android {
         debug!("Android: Calling start_send");
 
         // Emit initial progress event
-        let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
-            percentage: 0.0,
-            current_file: file_path.clone(),
-            files_processed: 0,
-            total_files: 1,
-        });
+        let _ = window.emit(
+            "import_progress",
+            crate::events::ImportProgressEvent {
+                percentage: 0.0,
+                current_file: file_path.clone(),
+                files_processed: 0,
+                total_files: 1,
+            },
+        );
 
-        let (ticket, router, _blobs_data_dir) = start_send(send_args, Some(window.clone())).await.map_err(|e| {
+        let (ticket, router, _blobs_data_dir) = start_send(send_args, Some(window.clone()))
+            .await
+            .map_err(|e| {
             let err_msg = format!("start_send failed: {}", e);
             error!("Android: {}", err_msg);
             err_msg
@@ -165,12 +171,15 @@ pub mod android {
         debug!("Android: Blob/ticket string length: {}", blob.len());
 
         // Emit progress - file preparation complete
-        let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
-            percentage: 50.0,
-            current_file: file_path.clone(),
-            files_processed: 1,
-            total_files: 1,
-        });
+        let _ = window.emit(
+            "import_progress",
+            crate::events::ImportProgressEvent {
+                percentage: 50.0,
+                current_file: file_path.clone(),
+                files_processed: 1,
+                total_files: 1,
+            },
+        );
 
         // Store router and data dir in global state to keep them alive BEFORE making HTTP request
         {
@@ -199,20 +208,26 @@ pub mod android {
                 info!("Android: Blob created successfully with code: {}", code);
 
                 // Emit completion event
-                let _ = window.emit("import_progress", crate::events::ImportProgressEvent {
-                    percentage: 100.0,
-                    current_file: file_path,
-                    files_processed: 1,
-                    total_files: 1,
-                });
+                let _ = window.emit(
+                    "import_progress",
+                    crate::events::ImportProgressEvent {
+                        percentage: 100.0,
+                        current_file: file_path,
+                        files_processed: 1,
+                        total_files: 1,
+                    },
+                );
 
-                let _ = window.emit("send_completed", crate::events::SendCompletedEvent {
-                    success: true,
-                    message: "Files prepared successfully".to_string(),
-                    elapsed_time_ms: 0,
-                    total_bytes: 0,
-                    files_count: 1,
-                });
+                let _ = window.emit(
+                    "send_completed",
+                    crate::events::SendCompletedEvent {
+                        success: true,
+                        message: "Files prepared successfully".to_string(),
+                        elapsed_time_ms: 0,
+                        total_bytes: 0,
+                        files_count: 1,
+                    },
+                );
 
                 Ok(code)
             }
