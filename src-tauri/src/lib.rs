@@ -5,6 +5,7 @@
 
 // Import modules
 mod android_compat;
+mod background_manager;
 mod config;
 mod events;
 mod logger;
@@ -44,7 +45,8 @@ fn get_temp_dir() -> std::path::PathBuf {
 
     #[cfg(target_os = "android")]
     {
-        // On Android, use app-specific external files directory
+        // On Android, use app-specific external files directory with a single Temp folder
+        // Path: /storage/emulated/0/Android/data/com.sendme_gui.app/files/Temp
         let mut path =
             android_compat::android::get_android_external_files_dir().unwrap_or_else(|_| {
                 let mut p = std::path::PathBuf::from(&cfg.platform.sdcard_fallback_path);
@@ -53,7 +55,7 @@ fn get_temp_dir() -> std::path::PathBuf {
                 p.push("files");
                 p
             });
-        path.push(format!("{}temp", cfg.storage.temp_dir_prefix));
+        path.push("Temp");
         path
     }
     #[cfg(not(target_os = "android"))]
@@ -71,17 +73,29 @@ async fn send_file_command(
     verbose: bool,
     _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
+    // Enable background mode before starting transfer (with window for Android service)
+    background_manager::enable_background_mode_with_window(&window);
+
     #[cfg(target_os = "android")]
     {
-        android_compat::android::send_file_minimal(file_path, verbose, window).await
+        let result = android_compat::android::send_file_minimal(file_path, verbose, window.clone()).await;
+        // Keep background mode enabled even after success to maintain the connection
+        if result.is_err() {
+            background_manager::disable_background_mode_with_window(&window);
+        }
+        result
     }
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::send_file_minimal(file_path, verbose, _state.clone(), window).await {
-            Ok(ticket) => Ok(ticket),
+        match sendme::send_file_minimal(file_path, verbose, _state.clone(), window.clone()).await {
+            Ok(ticket) => {
+                // Keep background mode enabled to maintain the connection
+                Ok(ticket)
+            }
             Err(_e) => {
-                // stop sharing if it fails
+                // Disable background mode and stop sharing if it fails
+                background_manager::disable_background_mode_with_window(&window);
                 let _e = sendme::stop_sharing(_state).await;
                 // Err(e.to_string())
                 // Emit error event if sending failed
@@ -98,17 +112,29 @@ async fn send_files_command(
     verbose: bool,
     _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
+    // Enable background mode before starting transfer (with window for Android service)
+    background_manager::enable_background_mode_with_window(&window);
+
     #[cfg(target_os = "android")]
     {
-        android_compat::android::send_files_minimal(file_paths, verbose, window).await
+        let result = android_compat::android::send_files_minimal(file_paths, verbose, window.clone()).await;
+        // Keep background mode enabled even after success to maintain the connection
+        if result.is_err() {
+            background_manager::disable_background_mode_with_window(&window);
+        }
+        result
     }
 
     #[cfg(not(target_os = "android"))]
     {
-        match sendme::send_files_minimal(file_paths, verbose, _state.clone(), window).await {
-            Ok(ticket) => Ok(ticket),
+        match sendme::send_files_minimal(file_paths, verbose, _state.clone(), window.clone()).await {
+            Ok(ticket) => {
+                // Keep background mode enabled to maintain the connection
+                Ok(ticket)
+            }
             Err(_e) => {
-                // stop sharing if it fails
+                // Disable background mode and stop sharing if it fails
+                background_manager::disable_background_mode_with_window(&window);
                 let _e = sendme::stop_sharing(_state).await;
                 Err("Failed to send files".to_string())
             }
@@ -117,7 +143,10 @@ async fn send_files_command(
 }
 
 #[tauri::command]
-async fn stop_sharing_command(_state: State<'_, SharedSenderState>) -> Result<(), String> {
+async fn stop_sharing_command(window: Window, _state: State<'_, SharedSenderState>) -> Result<(), String> {
+    // Disable background mode when stopping sharing (with window for Android service)
+    background_manager::disable_background_mode_with_window(&window);
+
     #[cfg(target_os = "android")]
     {
         android_compat::android::stop_sharing()
@@ -140,10 +169,16 @@ async fn receive_file_command(
     file_storage_path: String,
     verbose: bool,
 ) -> Result<String, String> {
-    // Tauri automatically provides the window parameter to the command
+    // Enable background mode before starting transfer (with window for Android service)
+    background_manager::enable_background_mode_with_window(&window);
 
     // Call our internal implementation that has the window parameter
-    receive_file_with_stats(window, ticket, file_storage_path, verbose).await
+    let result = receive_file_with_stats(window.clone(), ticket, file_storage_path, verbose).await;
+
+    // Disable background mode after transfer completes (success or failure)
+    background_manager::disable_background_mode_with_window(&window);
+
+    result
 }
 
 // New internal function that handles the actual download with statistics
@@ -166,6 +201,9 @@ async fn receive_file_with_stats(
         let ticket_clone = ticket.clone();
         let storage_path_clone = file_storage_path.clone();
 
+        // Prepare window clone for the Android receive function
+        let window_for_android = window.clone();
+
         // Call the Android-specific implementation on a blocking thread
         let join_result = tauri::async_runtime::spawn_blocking(move || {
             futures::executor::block_on(async move {
@@ -173,6 +211,7 @@ async fn receive_file_with_stats(
                     ticket_clone,
                     storage_path_clone,
                     verbose,
+                    window_for_android,
                 )
                 .await
             })
@@ -386,6 +425,28 @@ fn get_file_size(path: String) -> Result<u64, String> {
     }
 }
 
+#[tauri::command]
+fn cleanup_temp_directory() -> Result<String, String> {
+    logger::info!("Manual cleanup requested for temporary directory");
+    cleanup_sendme_dirs();
+    Ok("Temporary directory cleaned successfully".to_string())
+}
+
+#[tauri::command]
+fn is_background_mode_enabled() -> bool {
+    background_manager::is_background_mode_enabled()
+}
+
+#[tauri::command]
+fn enable_background_mode() {
+    background_manager::enable_background_mode();
+}
+
+#[tauri::command]
+fn disable_background_mode() {
+    background_manager::disable_background_mode();
+}
+
 fn calculate_directory_size(path: &Path) -> Result<u64, std::io::Error> {
     let mut total: u64 = 0;
     let mut stack = Vec::new();
@@ -425,34 +486,54 @@ fn calculate_directory_size(path: &Path) -> Result<u64, std::io::Error> {
     Ok(total)
 }
 
-/// Deletes all directories in the current directory whose names start with temp_dir_prefix.
+/// Deletes temporary directories and files.
+/// On Android, cleans the entire Temp directory.
+/// On desktop, removes directories starting with temp_dir_prefix.
 fn cleanup_sendme_dirs() {
-    let cfg = config();
-    let prefix = &cfg.storage.temp_dir_prefix;
+    #[cfg(target_os = "android")]
+    {
+        // On Android, clean up the entire Temp directory
+        if let Ok(temp_dir) = CWD.canonicalize() {
+            logger::info!("Cleaning up Android Temp directory: {}", temp_dir.display());
+            match std::fs::remove_dir_all(&temp_dir) {
+                Ok(_) => logger::info!("Removed Temp directory: {}", temp_dir.display()),
+                Err(e) => logger::error!("Failed to remove Temp directory {}: {}", temp_dir.display(), e),
+            }
+        } else {
+            logger::error!("Could not determine the Temp directory for cleanup");
+        }
+    }
 
-    if let Ok(current_dir) = CWD.canonicalize() {
-        match std::fs::read_dir(&current_dir) {
-            Ok(entries) => {
-                for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if name.starts_with(prefix.as_str()) {
-                            let path = entry.path();
-                            if path.is_dir() {
-                                match std::fs::remove_dir_all(&path) {
-                                    Ok(_) => logger::info!("Removed directory: {}", path.display()),
-                                    Err(e) => {
-                                        logger::error!("Failed to remove {}: {}", path.display(), e)
+    #[cfg(not(target_os = "android"))]
+    {
+        // On desktop, remove directories starting with temp_dir_prefix
+        let cfg = config();
+        let prefix = &cfg.storage.temp_dir_prefix;
+
+        if let Ok(current_dir) = CWD.canonicalize() {
+            match std::fs::read_dir(&current_dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if name.starts_with(prefix.as_str()) {
+                                let path = entry.path();
+                                if path.is_dir() {
+                                    match std::fs::remove_dir_all(&path) {
+                                        Ok(_) => logger::info!("Removed directory: {}", path.display()),
+                                        Err(e) => {
+                                            logger::error!("Failed to remove {}: {}", path.display(), e)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+                Err(e) => logger::error!("Failed to read current directory: {}", e),
             }
-            Err(e) => logger::error!("Failed to read current directory: {}", e),
+        } else {
+            logger::error!("Could not determine the current directory for cleanup");
         }
-    } else {
-        logger::error!("Could not determine the current directory for cleanup");
     }
 }
 
@@ -464,9 +545,13 @@ pub fn run() {
 
     logger::info!("Starting SendMe application");
 
+    // Initialize background task handling
+    background_manager::init_background_handling();
+
     // Set a panic hook to attempt cleanup on a crash.
     std::panic::set_hook(Box::new(|panic_info| {
         logger::error!("Application panicked: {:?}", panic_info);
+        background_manager::disable_background_mode();
         cleanup_sendme_dirs();
     }));
 
@@ -485,22 +570,43 @@ pub fn run() {
             stop_sharing_command,
             receive_file_command,
             get_downloads_dir,
-            get_file_size
+            get_file_size,
+            cleanup_temp_directory,
+            is_background_mode_enabled,
+            enable_background_mode,
+            disable_background_mode
         ])
-        .on_window_event(|_app, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+        .on_window_event(|_app, event| match event {
+            tauri::WindowEvent::CloseRequested { .. } => {
                 cleanup_sendme_dirs();
                 // api.prevent_close();
             }
+            tauri::WindowEvent::Focused(focused) => {
+                if *focused {
+                    background_manager::on_app_foregrounded();
+                } else {
+                    background_manager::on_app_backgrounded();
+                }
+            }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| match event {
             tauri::RunEvent::ExitRequested { api, .. } => {
-                cleanup_sendme_dirs();
-                api.prevent_exit();
+                // Check if background tasks are running
+                if background_manager::is_background_mode_enabled() {
+                    logger::warn!("Background tasks are running - preventing exit");
+                    api.prevent_exit();
+                } else {
+                    cleanup_sendme_dirs();
+                    background_manager::disable_background_mode();
+                }
             }
-            tauri::RunEvent::Exit => cleanup_sendme_dirs(),
+            tauri::RunEvent::Exit => {
+                cleanup_sendme_dirs();
+                background_manager::disable_background_mode();
+            }
             _ => {}
         })
 }

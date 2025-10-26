@@ -19,11 +19,14 @@ import {
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
+import { isAndroid, openAndroidDirectoryPicker, openAndroidFilePicker } from "@/utils/androidPicker";
+import { formatPathForDisplay } from "@/utils/pathFormatter";
 
 interface FileInfo {
   name: string;
   size: string;
   path: string;
+  displayName?: string; // Optional formatted name for display
 }
 
 interface TransferProgressEvent {
@@ -57,7 +60,6 @@ const FileSend: React.FC = () => {
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [sendCode, setSendCode] = useState<string>("");
-  const [isAndroid, setIsAndroid] = useState(false);
   const [importProgress, setImportProgress] = useState<number>(0);
   const [importStatus, setImportStatus] = useState<{
     currentFile: string;
@@ -77,10 +79,6 @@ const FileSend: React.FC = () => {
   const [transferProgress, setTransferProgress] = useState<number>(0);
 
   useEffect(() => {
-    if (typeof navigator !== "undefined") {
-      setIsAndroid(/android/i.test(navigator.userAgent));
-    }
-
     // Set up event listeners for send/upload events
     const setupSendListeners = async () => {
       const unlisteners: (() => void)[] = [];
@@ -193,10 +191,19 @@ const FileSend: React.FC = () => {
 
   const handleFileSelect = async () => {
     try {
-      const selected = await open({
-        multiple: true,
-        title: "Select Files to Send",
-      });
+      let selected: string | string[] | null = null;
+
+      if (isAndroid()) {
+        // Use Android-specific file picker
+        const uris = await openAndroidFilePicker(true);
+        selected = uris;
+      } else {
+        // Use Tauri dialog for desktop
+        selected = await open({
+          multiple: true,
+          title: "Select Files to Send",
+        });
+      }
 
       await processSelection(selected ?? null);
     } catch (error) {
@@ -208,14 +215,51 @@ const FileSend: React.FC = () => {
 
   const handleDirSelect = async () => {
     try {
-      const selected = await open({
-        multiple: true,
-        directory: true,
-        title: "Select Directories to Send",
-      });
+      if (isAndroid()) {
+        // On Android, use the custom directory picker
+        const uri = await openAndroidDirectoryPicker();
+        if (!uri) {
+          return; // User cancelled
+        }
 
-      if (selected && Array.isArray(selected) && selected.length > 0) {
-        await processSelection(selected);
+        setStatus("processing");
+        setStatusMessage("Processing directory...");
+
+        // Resolve the directory URI to get the local directory path
+        if (!window.FileResolverPlugin) {
+          throw new Error('FileResolverPlugin not available');
+        }
+
+        const response = JSON.parse(window.FileResolverPlugin.resolveDirectoryToPath(uri));
+
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to resolve directory');
+        }
+
+        // Add the directory as a single entry
+        const formatted = {
+          name: response.originalName || "Folder",
+          displayName: formatPathForDisplay(response.path),
+          path: response.path,
+          size: typeof response.size === "number" ? formatFileSize(response.size) : "Calculating...",
+        };
+
+        appendResolvedFiles([formatted]);
+        setStatus("idle");
+        setStatusMessage("");
+
+        logger.info("FileSend", `Directory added: ${response.path}`);
+      } else {
+        // Use Tauri dialog for desktop
+        const selected = await open({
+          multiple: true,
+          directory: true,
+          title: "Select Directories to Send",
+        });
+
+        if (selected && Array.isArray(selected) && selected.length > 0) {
+          await processSelection(selected);
+        }
       }
     } catch (error) {
       logger.error("FileSend", "Error selecting directories", error);
@@ -391,7 +435,7 @@ const FileSend: React.FC = () => {
               variant="outline"
               className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
               onClick={handleDirSelect}
-              disabled={status === "processing" || isAndroid}
+              disabled={status === "processing"}
             >
               {status === "processing" ? (
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -422,7 +466,7 @@ const FileSend: React.FC = () => {
                       <File className="h-4 w-4 text-foreground shrink-0" />
                       <div className="min-w-0">
                         <div className="font-medium text-xs truncate">
-                          {file.name}
+                          {file.displayName || file.name}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {file.size}

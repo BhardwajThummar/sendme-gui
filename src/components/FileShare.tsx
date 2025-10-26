@@ -15,12 +15,15 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import { isAndroid, openAndroidDirectoryPicker, openAndroidFilePicker } from "@/utils/androidPicker";
+import { formatPathForDisplay } from "@/utils/pathFormatter";
 
 interface FileInfo {
   name: string;
   size: string;
   path: string;
+  displayName?: string; // Optional formatted name for display
 }
 
 const FileShare: React.FC = () => {
@@ -30,13 +33,6 @@ const FileShare: React.FC = () => {
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [shareCode, setShareCode] = useState<string>("");
-  const [isAndroid, setIsAndroid] = useState(false);
-
-  useEffect(() => {
-    if (typeof navigator !== "undefined") {
-      setIsAndroid(/android/i.test(navigator.userAgent));
-    }
-  }, []);
 
   // Format file size for display
   const formatFileSize = (bytes: number): string => {
@@ -95,10 +91,19 @@ const FileShare: React.FC = () => {
 
   const handleFileSelect = async () => {
     try {
-      const selected = await open({
-        multiple: true,
-        title: "Select Files to Share",
-      });
+      let selected: string | string[] | null = null;
+
+      if (isAndroid()) {
+        // Use Android-specific file picker
+        const uris = await openAndroidFilePicker(true);
+        selected = uris;
+      } else {
+        // Use Tauri dialog for desktop
+        selected = await open({
+          multiple: true,
+          title: "Select Files to Share",
+        });
+      }
 
       await processSelection(selected ?? null);
     } catch (error) {
@@ -110,14 +115,51 @@ const FileShare: React.FC = () => {
 
   const handleDirSelect = async () => {
     try {
-      const selected = await open({
-        multiple: true,
-        directory: true,
-        title: "Select Directories to Share",
-      });
+      if (isAndroid()) {
+        // On Android, use the custom directory picker
+        const uri = await openAndroidDirectoryPicker();
+        if (!uri) {
+          return; // User cancelled
+        }
 
-      if (selected && Array.isArray(selected) && selected.length > 0) {
-        await processSelection(selected);
+        setStatus("processing");
+        setStatusMessage("Processing directory...");
+
+        // Resolve the directory URI to get the local directory path
+        if (!window.FileResolverPlugin) {
+          throw new Error('FileResolverPlugin not available');
+        }
+
+        const response = JSON.parse(window.FileResolverPlugin.resolveDirectoryToPath(uri));
+
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to resolve directory');
+        }
+
+        // Add the directory as a single entry
+        const formatted = {
+          name: response.originalName || "Folder",
+          displayName: formatPathForDisplay(response.path),
+          path: response.path,
+          size: typeof response.size === "number" ? formatFileSize(response.size) : "Calculating...",
+        };
+
+        appendResolvedFiles([formatted]);
+        setStatus("idle");
+        setStatusMessage("");
+
+        logger.info("FileShare", `Directory added: ${response.path}`);
+      } else {
+        // Use Tauri dialog for desktop
+        const selected = await open({
+          multiple: true,
+          directory: true,
+          title: "Select Directories to Share",
+        });
+
+        if (selected && Array.isArray(selected) && selected.length > 0) {
+          await processSelection(selected);
+        }
       }
     } catch (error) {
       logger.error("FileShare", "Error selecting directories", error);
@@ -247,7 +289,7 @@ const FileShare: React.FC = () => {
               variant="outline"
               className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
               onClick={handleDirSelect}
-              disabled={status === "processing" || isAndroid}
+              disabled={status === "processing"}
             >
               {status === "processing" ? (
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -278,7 +320,7 @@ const FileShare: React.FC = () => {
                       <File className="h-4 w-4 text-foreground shrink-0" />
                       <div className="min-w-0">
                         <div className="font-medium text-xs truncate">
-                          {file.name}
+                          {file.displayName || file.name}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {file.size}

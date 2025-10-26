@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import FileSend from './components/FileSend';
 import FileReceive from './components/FileReceive';
 import { ToastProvider } from './components/ui/toast';
@@ -7,10 +7,45 @@ import { Button } from './components/ui/button';
 import { logger } from './utils/logger';
 import { TransferProvider, useTransfer } from './context/TransferContext';
 import { getVersionString } from './utils/version';
+import { listen } from '@tauri-apps/api/event';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<string>('send');
   const { transferState } = useTransfer();
+
+  // Listen for background service events from Rust
+  useEffect(() => {
+    const unlistenStart = listen('start-background-service', () => {
+      logger.info('App', 'Received start-background-service event');
+      // Call Android plugin to start foreground service
+      if ((window as any).BackgroundServicePlugin) {
+        try {
+          const result = (window as any).BackgroundServicePlugin.startBackgroundService();
+          logger.info('App', `Background service started: ${result}`);
+        } catch (error) {
+          logger.error('App', `Failed to start background service: ${error}`);
+        }
+      }
+    });
+
+    const unlistenStop = listen('stop-background-service', () => {
+      logger.info('App', 'Received stop-background-service event');
+      // Call Android plugin to stop foreground service
+      if ((window as any).BackgroundServicePlugin) {
+        try {
+          const result = (window as any).BackgroundServicePlugin.stopBackgroundService();
+          logger.info('App', `Background service stopped: ${result}`);
+        } catch (error) {
+          logger.error('App', `Failed to stop background service: ${error}`);
+        }
+      }
+    });
+
+    return () => {
+      unlistenStart.then(fn => fn());
+      unlistenStop.then(fn => fn());
+    };
+  }, []);
 
   const handleTabChange = (value: string) => {
     logger.debug('App', `Tab change requested: ${activeTab} → ${value}`);

@@ -15,6 +15,18 @@ interface FileResolverSuccess {
     size?: number;
 }
 
+interface DirectoryResolverSuccess {
+    success: true;
+    isDirectory: true;
+    files: Array<{
+        path: string;
+        originalName: string;
+        size: number;
+    }>;
+    totalSize: number;
+    fileCount: number;
+}
+
 interface FileResolverError {
     success: false;
     error: string;
@@ -68,6 +80,40 @@ async function resolveContentUri(uri: string): Promise<ResolvedFileEntry> {
     };
 }
 
+async function resolveDirectoryUri(uri: string): Promise<ResolvedFileEntry[]> {
+    if (typeof window === 'undefined' || !window.FileResolverPlugin) {
+        throw new Error('Android file resolver bridge is not available.');
+    }
+
+    logger.info('FileSelection', `Resolving directory URI: ${uri}`);
+
+    const response = window.FileResolverPlugin.resolveDirectoryUri(uri);
+
+    logger.debug('FileSelection', `Directory resolver response: ${response}`);
+
+    let parsed: DirectoryResolverSuccess | FileResolverError;
+
+    try {
+        parsed = JSON.parse(response) as DirectoryResolverSuccess | FileResolverError;
+    } catch (error) {
+        throw new Error(`Failed to parse resolver response: ${String(error)}`);
+    }
+
+    if (!parsed.success) {
+        throw new Error(parsed.error || 'Unknown error while resolving directory');
+    }
+
+    logger.info('FileSelection', `Directory resolved with ${parsed.files.length} files`);
+
+    // Convert the array of files to ResolvedFileEntry format
+    return parsed.files.map(file => ({
+        path: file.path,
+        name: sanitizeName(file.originalName),
+        sizeBytes: file.size,
+        originalUri: uri,
+    }));
+}
+
 async function safeGetFileSize(path: string): Promise<number | null> {
     try {
         const size = await invoke<number>('get_file_size', { path });
@@ -100,18 +146,39 @@ export async function resolveFileEntries(selection: string | string[] | null): P
         return [];
     }
 
-    const resolved = await Promise.all(
-        entries.map(async (entry) => {
-            if (entry.startsWith('content://')) {
-                return resolveContentUri(entry);
+    const allResolvedEntries: ResolvedFileEntry[] = [];
+
+    for (const entry of entries) {
+        logger.debug('FileSelection', `Processing entry: ${entry}`);
+
+        if (entry.startsWith('content://')) {
+            // Check if this is a directory URI (tree URI from SAF)
+            // Directory URIs typically contain '/tree/' in the path
+            const isTreeUri = entry.includes('/tree/') || entry.includes('com.android.externalstorage.documents/tree');
+            logger.info('FileSelection', `Content URI detected. Is tree URI: ${isTreeUri}`);
+
+            if (isTreeUri) {
+                // This is a directory URI, resolve all files within
+                logger.info('FileSelection', 'Resolving as directory');
+                const directoryFiles = await resolveDirectoryUri(entry);
+                allResolvedEntries.push(...directoryFiles);
+            } else {
+                // Single file URI
+                logger.info('FileSelection', 'Resolving as single file');
+                const resolved = await resolveContentUri(entry);
+                allResolvedEntries.push(resolved);
             }
+        } else {
+            // Standard file path
+            logger.info('FileSelection', 'Resolving as standard path');
+            const resolved = await resolveStandardPath(entry);
+            allResolvedEntries.push(resolved);
+        }
+    }
 
-            return resolveStandardPath(entry);
-        })
-    );
-
+    // Remove duplicates by path
     const uniqueByPath = new Map<string, ResolvedFileEntry>();
-    for (const item of resolved) {
+    for (const item of allResolvedEntries) {
         if (!uniqueByPath.has(item.path)) {
             uniqueByPath.set(item.path, item);
         }
