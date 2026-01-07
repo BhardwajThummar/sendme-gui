@@ -13,6 +13,11 @@ declare global {
             getLastDirectoryUri(): string;
             getLastFileUris(): string;
         };
+        IOSPickerPlugin?: {
+            openDirectoryPicker(): string;
+            openFilePicker(multiple: boolean): string;
+            getLastResult(): string;
+        };
     }
 }
 
