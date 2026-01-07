@@ -7,7 +7,10 @@ use std::{path::PathBuf, sync::Mutex};
 pub struct SenderState {
     pub router: Option<iroh::protocol::Router>,
     pub blobs_data_dir: Option<PathBuf>,
+    // Store multiple routers and their data directories for multi-file transfers
+    pub routers: Vec<iroh::protocol::Router>,
+    pub blobs_data_dirs: Vec<PathBuf>,
 }
 
-// For easier sharing in Tauri, we’ll wrap it in a Mutex.
+// For easier sharing in Tauri, we'll wrap it in a Mutex.
 pub type SharedSenderState = Mutex<SenderState>;

@@ -19,6 +19,9 @@
     ],
     "android": {
       "minSdkVersion": 29
+    },
+    "iOS": {
+      "frameworks": ["SystemConfiguration"]
     }
   },
   "productName": "sendme-gui",
@@ -29,6 +32,7 @@
     "dialog": null
   },
   "app": {
+    "withGlobalTauri": true,
     "security": {
       "csp": null
     },
@@ -45,7 +49,7 @@
         "center": true,
         "decorations": true,
         "transparent": false,
-        "useHttpsScheme": true
+        "useHttpsScheme": false
       }
     ]
   }
