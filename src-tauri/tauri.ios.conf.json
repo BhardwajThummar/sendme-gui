@@ -1,0 +1,14 @@
+{
+  "build": {
+    "beforeBuildCommand": "tsc && vite build",
+     "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "useHttpsScheme": false
+      }
+    ]
+  }
+}

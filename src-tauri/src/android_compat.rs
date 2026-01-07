@@ -10,7 +10,7 @@ pub mod android {
 
     use crate::{
         config::config,
-        logger::{debug, error, info, warn},
+        logger::{debug, error, info},
     };
 
     // Global state to keep router alive on Android
@@ -125,7 +125,7 @@ pub mod android {
         use tauri::Emitter;
 
         use crate::sendme::{
-            create_blob, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
+            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
         };
 
         info!("Android: Starting send_file_minimal for: {}", file_path);
@@ -199,7 +199,7 @@ pub mod android {
         use std::time::Duration;
         let result = tokio::time::timeout(
             Duration::from_secs(cfg.network.http_timeout_secs),
-            create_blob(blob),
+            create_blobs(vec![blob]),
         )
         .await;
 
@@ -326,8 +326,11 @@ pub mod android {
         verbose: bool,
         window: tauri::Window,
     ) -> Result<String, String> {
-        // For now, Android will just send the first file
-        // TODO: Implement proper multi-file support for Android
+        use crate::sendme::{
+            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
+        };
+        use std::path::PathBuf;
+
         if file_paths.is_empty() {
             return Err("No files provided".to_string());
         }
@@ -336,13 +339,73 @@ pub mod android {
             return send_file_minimal(file_paths[0].clone(), verbose, window).await;
         }
 
-        // For multiple files, we could implement similar directory bundling logic
-        // For now, just send the first file with a warning
-        warn!(
-            "Android: Multiple files requested ({}), but only first file will be sent",
-            file_paths.len()
-        );
-        send_file_minimal(file_paths[0].clone(), verbose, window).await
+        info!("Android: Starting multi-file send for {} files", file_paths.len());
+
+        // Create individual blob tickets for each file
+        let mut blob_tickets = Vec::new();
+
+        for (idx, file_path) in file_paths.iter().enumerate() {
+            let source = PathBuf::from(file_path);
+            if !source.exists() {
+                return Err(format!("File not found: {}", file_path));
+            }
+
+            info!("Android: Creating blob for file {}/{}: {}", idx + 1, file_paths.len(), file_path);
+
+            // Create send args for this individual file
+            let send_args = SendArgs {
+                path: source.clone(),
+                ticket_type: AddrInfoOptions::RelayAndAddresses,
+                common: CommonArgs {
+                    magic_ipv4_addr: None,
+                    magic_ipv6_addr: None,
+                    format: Format::Hex,
+                    verbose: if verbose { 1 } else { 0 },
+                    relay: RelayModeOption::Default,
+                },
+            };
+
+            // Start send for this file
+            let result = start_send(send_args, Some(window.clone())).await;
+
+            match result {
+                Ok((ticket, _router, _blobs_data_dir)) => {
+                    info!("Android: Created blob ticket for {}: {}", file_path, ticket);
+                    blob_tickets.push(ticket.to_string());
+                }
+                Err(e) => {
+                    error!("Android: Failed to create blob for {}: {}", file_path, e);
+                    return Err(format!("Failed to create blob for {}: {}", file_path, e));
+                }
+            }
+        }
+
+        info!("Android: Created {} blob tickets, now creating code", blob_tickets.len());
+
+        // Create a single code that contains all blob tickets
+        let cfg = config();
+        let timeout_duration = std::time::Duration::from_secs(cfg.api.timeout_secs);
+
+        match tokio::time::timeout(timeout_duration, create_blobs(blob_tickets)).await {
+            Ok(Ok(code)) => {
+                info!("Android: Successfully created code {} for {} files", code, file_paths.len());
+                Ok(code)
+            }
+            Ok(Err(err)) => {
+                error!("Android: Failed to create code for blobs: {}", err);
+                Err(format!("Failed to create code for blobs: {}", err))
+            }
+            Err(_) => {
+                error!(
+                    "Android: Timeout: create_blobs took longer than {} seconds",
+                    cfg.api.timeout_secs
+                );
+                Err(format!(
+                    "Timeout: create_blobs took longer than {} seconds",
+                    cfg.api.timeout_secs
+                ))
+            }
+        }
     }
 }
 

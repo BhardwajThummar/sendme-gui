@@ -1,10 +1,10 @@
-import path from 'path'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vite'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "url";
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(async () => ({
     plugins: [react(), tailwindcss()],
 
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -15,18 +15,14 @@ export default defineConfig({
     server: {
         port: 1420,
         strictPort: true,
-        host: true,
-        allowedHosts : true,
         watch: {
             // 3. tell vite to ignore watching `src-tauri`
-            ignored: ['**/src-tauri/**']
-        }
+            ignored: ["**/src-tauri/**"],
+        },
     },
-
-    // Shadcn UI
     resolve: {
         alias: {
-            '@': path.resolve(__dirname, './src')
-        }
-    }
-})
+            "@": fileURLToPath(new URL("./src", import.meta.url)),
+        },
+    },
+}));

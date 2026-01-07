@@ -946,12 +946,16 @@ struct GetBlobResponse {
     blobs: Vec<String>,
 }
 
-pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
+pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> {
     let cfg = config();
     let client = Client::new();
-    let payload = BlobRequest { blobs: vec![blob] };
+    let payload = BlobRequest { blobs };
 
-    info!("Creating blob using BASE_URL: {}", cfg.api.base_url);
+    info!(
+        "Creating {} blobs using BASE_URL: {}",
+        payload.blobs.len(),
+        cfg.api.base_url
+    );
 
     let response = client
         .post(format!("{}/api/code/", cfg.api.base_url))
@@ -961,7 +965,7 @@ pub async fn create_blob(blob: String) -> Result<String, Box<dyn Error>> {
         .json::<BlobResponse>()
         .await?;
 
-    info!("Blob created successfully with code: {}", response.code);
+    info!("Blobs created successfully with code: {}", response.code);
     Ok(response.code)
 }
 
@@ -1168,7 +1172,7 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
             info!("Downloading to: {}", first);
         }
     }
-    export(db, collection, storage_file_path).await?;
+    export(db, collection, storage_file_path.clone()).await?;
     tokio::fs::remove_dir_all(iroh_data_dir).await?;
     if args.common.verbose > 0 {
         info!(
@@ -1338,13 +1342,12 @@ pub async fn send_file_minimal(
         sender_state.router = Some(router);
         sender_state.blobs_data_dir = Some(blobs_data_dir);
     }
-    // Save the blob to the database using create_blob
+    // Save the blob to the database using create_blobs (single blob in a vector)
     let blob = ticket.to_string();
-    match create_blob(blob).await {
+    match create_blobs(vec![blob]).await {
         Ok(code) => Ok(code),
         Err(err) => Err(anyhow::anyhow!("Failed to create blob: {}", err)),
     }
-    // Ok(ticket.to_string())
 }
 
 pub async fn send_files_minimal(
@@ -1358,98 +1361,86 @@ pub async fn send_files_minimal(
         return send_file_minimal(file_paths[0].clone(), verbose, state, window).await;
     }
 
-    // For multiple files, we need to create a temporary directory structure
-    // and import all files into it, then send that directory
-    let cfg = config();
+    info!("Starting multi-file send for {} files", file_paths.len());
 
-    // Create a temporary directory to hold links/copies of all files
-    let temp_collection_dir = CWD.join(format!(
-        "{}collection-{}",
-        cfg.storage.temp_dir_prefix,
-        rand::thread_rng()
-            .gen::<[u8; 8]>()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>()
-    ));
+    // Create individual blob tickets for each file
+    let mut blob_tickets = Vec::new();
 
-    tokio::fs::create_dir_all(&temp_collection_dir).await?;
-
-    // We'll create symlinks (or copies on Windows) to all the files in this directory
     for (idx, file_path) in file_paths.iter().enumerate() {
         let source = PathBuf::from(file_path);
         if !source.exists() {
-            tokio::fs::remove_dir_all(&temp_collection_dir).await?;
             anyhow::bail!("File not found: {}", file_path);
         }
 
-        // Use the original filename, or a numbered fallback if there's no filename
-        let fallback_name = format!("file_{}", idx);
-        let file_name = source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&fallback_name);
+        info!(
+            "Creating blob for file {}/{}: {}",
+            idx + 1,
+            file_paths.len(),
+            file_path
+        );
 
-        let dest = temp_collection_dir.join(file_name);
+        // Create send args for this individual file
+        let send_args = SendArgs {
+            path: source.clone(),
+            ticket_type: AddrInfoOptions::RelayAndAddresses,
+            common: CommonArgs {
+                magic_ipv4_addr: None,
+                magic_ipv6_addr: None,
+                format: Format::Hex,
+                verbose: if verbose { 1 } else { 0 },
+                relay: RelayModeOption::Default,
+            },
+        };
 
-        // Try to create a symlink first (faster), fall back to copy if symlink fails
-        #[cfg(unix)]
+        // Start send for this file
+        let (ticket, router, blobs_data_dir) = start_send(send_args, Some(window.clone())).await?;
+
+        info!("Created blob ticket for {}: {}", file_path, ticket);
+
+        // Store ALL routers and blobs_data_dirs in global state
+        // This keeps all file endpoints alive for download
         {
-            if (tokio::fs::symlink(&source, &dest).await).is_err() {
-                tokio::fs::copy(&source, &dest).await?;
-            }
+            let mut sender_state = state.lock().unwrap();
+            sender_state.routers.push(router);
+            sender_state.blobs_data_dirs.push(blobs_data_dir);
         }
-        #[cfg(not(unix))]
-        {
-            tokio::fs::copy(&source, &dest).await?;
-        }
+
+        // Add the blob ticket to our collection
+        blob_tickets.push(ticket.to_string());
     }
 
-    // Now send the temporary collection directory
-    let send_args = SendArgs {
-        path: temp_collection_dir.clone(),
-        ticket_type: AddrInfoOptions::RelayAndAddresses,
-        common: CommonArgs {
-            magic_ipv4_addr: None,
-            magic_ipv6_addr: None,
-            format: Format::Hex,
-            verbose: if verbose { 1 } else { 0 },
-            relay: RelayModeOption::Default,
-        },
-    };
+    info!(
+        "Created {} blob tickets, now creating code",
+        blob_tickets.len()
+    );
 
-    let (ticket, router, blobs_data_dir) = start_send(send_args, Some(window)).await?;
-
-    // Clean up the temporary collection directory
-    tokio::fs::remove_dir_all(&temp_collection_dir).await?;
-
-    info!("Sharing {} files with ticket: {}", file_paths.len(), ticket);
-
-    // Store the router and blobs_data_dir in global state
-    {
-        let mut sender_state = state.lock().unwrap();
-        sender_state.router = Some(router);
-        sender_state.blobs_data_dir = Some(blobs_data_dir);
-    }
-
-    // Save the blob to the database using create_blob
-    let blob = ticket.to_string();
-    match create_blob(blob).await {
-        Ok(code) => Ok(code),
-        Err(err) => Err(anyhow::anyhow!("Failed to create blob: {}", err)),
+    // Create a single code that contains all blob tickets
+    match create_blobs(blob_tickets).await {
+        Ok(code) => {
+            info!(
+                "Successfully created code {} for {} files",
+                code,
+                file_paths.len()
+            );
+            Ok(code)
+        }
+        Err(err) => Err(anyhow::anyhow!("Failed to create code for blobs: {}", err)),
     }
 }
 
 pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result<()> {
     let cfg = config();
-    let (router, blobs_data_dir) = {
+    let (router, blobs_data_dir, routers, blobs_data_dirs) = {
         let mut sender_state = state.lock().unwrap();
         (
             sender_state.router.take(),
             sender_state.blobs_data_dir.take(),
+            std::mem::take(&mut sender_state.routers),
+            std::mem::take(&mut sender_state.blobs_data_dirs),
         )
     };
 
+    // Shut down the single router if present (for single file transfers)
     if let Some(router) = router {
         debug!("Shutting down router");
         tokio::time::timeout(
@@ -1460,10 +1451,36 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
         info!("Router shutdown complete");
     }
 
+    // Shut down all routers (for multi-file transfers)
+    for (idx, router) in routers.into_iter().enumerate() {
+        debug!("Shutting down router {}", idx + 1);
+        if let Err(e) = tokio::time::timeout(
+            Duration::from_secs(cfg.network.router_shutdown_timeout_secs),
+            router.shutdown(),
+        )
+        .await
+        {
+            warn!("Failed to shutdown router {}: {:?}", idx + 1, e);
+        } else {
+            info!("Router {} shutdown complete", idx + 1);
+        }
+    }
+
+    // Clean up the single blobs directory if present
     if let Some(dir) = blobs_data_dir {
         debug!("Cleaning up blobs directory: {:?}", dir);
         tokio::fs::remove_dir_all(&dir).await?;
         info!("Blobs directory cleaned up");
+    }
+
+    // Clean up all blobs directories (for multi-file transfers)
+    for (idx, dir) in blobs_data_dirs.into_iter().enumerate() {
+        debug!("Cleaning up blobs directory {}: {:?}", idx + 1, dir);
+        if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
+            warn!("Failed to cleanup directory {}: {:?}", idx + 1, e);
+        } else {
+            info!("Blobs directory {} cleaned up", idx + 1);
+        }
     }
 
     Ok(())
@@ -1517,15 +1534,39 @@ pub async fn receive_file_with_progress(
 ) -> anyhow::Result<String> {
     debug!("Receiving file from ticket: {}", ticket);
 
-    let blob = match get_blob(ticket).await {
-        Ok(blob) => blob,
+    let blobs = match get_blob(ticket).await {
+        Ok(blobs) => blobs,
         Err(err) => {
             error!("Failed to get blob: {}", err);
             return Err(anyhow::anyhow!("Failed to get blob: {}", err));
         }
     };
 
-    let ticket = BlobTicket::from_str(&blob[0])?;
+    info!("Retrieved {} blob(s) to download", blobs.len());
+
+    // Download all blobs one by one
+    for (idx, blob_str) in blobs.iter().enumerate() {
+        info!("Downloading blob {}/{}", idx + 1, blobs.len());
+        let _ = window.emit(
+            "download_status",
+            format!("Downloading file {}/{}...", idx + 1, blobs.len()),
+        );
+
+        // Download this blob
+        receive_single_blob(blob_str, &file_storage_path, verbose, window.clone()).await?;
+    }
+
+    info!("Successfully downloaded all {} file(s)", blobs.len());
+    Ok("success".to_string())
+}
+
+async fn receive_single_blob(
+    blob_str: &str,
+    file_storage_path: &str,
+    verbose: bool,
+    window: tauri::Window,
+) -> anyhow::Result<()> {
+    let ticket = BlobTicket::from_str(blob_str)?;
     let addr = ticket.node_addr().clone();
 
     info!("Starting file receive from node: {}", addr.node_id);
@@ -1669,7 +1710,7 @@ pub async fn receive_file_with_progress(
         }
     }
 
-    export(db, collection, file_storage_path).await?;
+    export(db, collection, file_storage_path.to_string()).await?;
     tokio::fs::remove_dir_all(iroh_data_dir).await?;
 
     info!(
@@ -1680,5 +1721,5 @@ pub async fn receive_file_with_progress(
         HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64),
     );
 
-    Ok("success".to_string())
+    Ok(())
 }
