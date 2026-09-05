@@ -9,10 +9,10 @@ echo ""
 
 # Remove the problematic directories
 echo "Removing tauri-plugin-dialog .tauri directory..."
-sudo rm -rf /Users/bhardwaj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.2.1/.tauri
+sudo rm -rf "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.2.1/.tauri"
 
 echo "Removing tauri-plugin-shell .tauri directory..."
-sudo rm -rf /Users/bhardwaj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-shell-2.2.1/.tauri
+sudo rm -rf "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-shell-2.2.1/.tauri"
 
 echo ""
 echo "Done! Now you can rebuild the iOS app."
