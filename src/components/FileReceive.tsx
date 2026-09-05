@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  Camera,
   CheckCircle,
   Download,
   FileDown,
@@ -25,6 +26,7 @@ import { getDownloadsFolderPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, openAndroidDirectoryPicker } from "@/utils/androidPicker";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
+import QrScanner from "@/components/QrScanner";
 
 // Define types for download events
 interface DownloadCompletedEvent {
@@ -65,6 +67,9 @@ const FileReceive: React.FC = () => {
     speed: string;
   } | null>(null);
   const [_isAndroid, setIsAndroid] = useState(false);
+  // Raw ticket, pasted or scanned (no server configured case)
+  const [ticketInput, setTicketInput] = useState<string>("");
+  const [showScanner, setShowScanner] = useState<boolean>(false);
 
   // Live transfer stats
   const [liveStats, setLiveStats] = useState<{
@@ -341,12 +346,13 @@ const FileReceive: React.FC = () => {
   };
 
   const handleReceive = async () => {
-    const fullCode = code.join("");
+    const trimmedTicket = ticketInput.trim();
+    const fullCode = trimmedTicket || code.join("");
 
-    if (fullCode.length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) {
+    if (!trimmedTicket && fullCode.length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) {
       setStatus("error");
       setStatusMessage(
-        `Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code`
+        `Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code, or paste/scan a ticket`
       );
       return;
     }
@@ -387,6 +393,7 @@ const FileReceive: React.FC = () => {
   // Reset the form
   const handleReset = () => {
     setCode(Array(FILE_TRANSFER_CONFIG.CODE_LENGTH).fill(""));
+    setTicketInput("");
     setStatus("idle");
     setStatusMessage("");
     setProgress(0);
@@ -428,6 +435,15 @@ const FileReceive: React.FC = () => {
 
   return (
     <div className="w-full">
+      {showScanner && (
+        <QrScanner
+          onDetected={(content) => {
+            setTicketInput(content.trim());
+            setShowScanner(false);
+          }}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
       {downloadComplete ? (
         <div className="space-y-6">
           <div className="flex flex-col items-center justify-center">
@@ -525,6 +541,34 @@ const FileReceive: React.FC = () => {
           </div>
 
           <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                value={ticketInput}
+                onChange={(e) => setTicketInput(e.target.value.trim())}
+                placeholder="Paste a send ticket"
+                disabled={status === "processing"}
+                className="flex-1 border-border text-xs font-mono h-9"
+              />
+              <Button
+                variant="outline"
+                onClick={() => setShowScanner(true)}
+                disabled={status === "processing"}
+                className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
+                size="icon"
+                title="Scan QR code"
+              >
+                <Camera className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-xs font-medium block">Save files to</label>
             <div className="flex items-center gap-2">
               <Input
@@ -563,7 +607,8 @@ const FileReceive: React.FC = () => {
               className="w-full flex items-center gap-2"
               onClick={handleReceive}
               disabled={
-                code.join("").length !== FILE_TRANSFER_CONFIG.CODE_LENGTH ||
+                (!ticketInput.trim() &&
+                  code.join("").length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) ||
                 !downloadPath ||
                 status === "processing"
               }

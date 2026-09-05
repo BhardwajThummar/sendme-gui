@@ -25,3 +25,6 @@ dist-ssr
 
 /installer.env
 .env
+
+# This project uses Yarn; don't track an npm lockfile
+package-lock.json
