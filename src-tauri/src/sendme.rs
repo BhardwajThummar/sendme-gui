@@ -62,7 +62,14 @@ fn get_home_dir() -> std::path::PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(&_cfg.platform.sdcard_fallback_path))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        // On iOS, use the Documents directory
+        dirs::home_dir()
+            .map(|h| h.join("Documents"))
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
     }
@@ -90,7 +97,13 @@ fn get_temp_dir() -> std::path::PathBuf {
         path.push(format!("{}temp", cfg.storage.temp_dir_prefix));
         path
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        // On iOS, use the system temp directory with our prefix
+        let temp = std::env::temp_dir();
+        temp.join(format!("{}temp", cfg.storage.temp_dir_prefix))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         home.join(&cfg.storage.documents_folder)
