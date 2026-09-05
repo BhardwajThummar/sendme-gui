@@ -1000,26 +1000,6 @@ fn looks_like_raw_tickets(code: &str) -> bool {
         .all(|segment| BlobTicket::from_str(segment).is_ok())
 }
 
-#[cfg(test)]
-mod code_format_tests {
-    use super::looks_like_raw_tickets;
-
-    #[test]
-    fn short_numeric_code_is_not_a_raw_ticket() {
-        assert!(!looks_like_raw_tickets("123456"));
-    }
-
-    #[test]
-    fn empty_string_is_not_a_raw_ticket() {
-        assert!(!looks_like_raw_tickets(""));
-    }
-
-    #[test]
-    fn garbage_text_is_not_a_raw_ticket() {
-        assert!(!looks_like_raw_tickets("not,a,ticket"));
-    }
-}
-
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     // Self-describing: a value made only of valid tickets was shared
     // without a server, regardless of whether one is configured locally.
@@ -1784,4 +1764,24 @@ async fn receive_single_blob(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod code_format_tests {
+    use super::looks_like_raw_tickets;
+
+    #[test]
+    fn short_numeric_code_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets("123456"));
+    }
+
+    #[test]
+    fn empty_string_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets(""));
+    }
+
+    #[test]
+    fn garbage_text_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets("not,a,ticket"));
+    }
 }
