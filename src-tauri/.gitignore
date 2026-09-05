@@ -6,4 +6,15 @@
 # will have schema files for capabilities auto-completion
 /gen/schemas
 
-/gen
+# Mobile projects are checked in (some native config, like iOS Info.plist
+# permissions, isn't expressible from tauri.conf.json alone) but their
+# build output is not.
+/gen/apple/build/
+/gen/apple/Externals/
+**/xcuserdata/
+*.xcuserstate
+/gen/android/build/
+/gen/android/app/build/
+/gen/android/.gradle/
+/gen/android/**/*.iml
+/gen/android/.idea/
