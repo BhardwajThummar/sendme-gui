@@ -125,7 +125,8 @@ pub mod android {
         use tauri::Emitter;
 
         use crate::sendme::{
-            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
+            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption,
+            SendArgs,
         };
 
         info!("Android: Starting send_file_minimal for: {}", file_path);
@@ -327,7 +328,8 @@ pub mod android {
         window: tauri::Window,
     ) -> Result<String, String> {
         use crate::sendme::{
-            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption, SendArgs,
+            create_blobs, start_send, AddrInfoOptions, CommonArgs, Format, RelayModeOption,
+            SendArgs,
         };
         use std::path::PathBuf;
 
@@ -339,7 +341,10 @@ pub mod android {
             return send_file_minimal(file_paths[0].clone(), verbose, window).await;
         }
 
-        info!("Android: Starting multi-file send for {} files", file_paths.len());
+        info!(
+            "Android: Starting multi-file send for {} files",
+            file_paths.len()
+        );
 
         // Create individual blob tickets for each file
         let mut blob_tickets = Vec::new();
@@ -350,7 +355,12 @@ pub mod android {
                 return Err(format!("File not found: {}", file_path));
             }
 
-            info!("Android: Creating blob for file {}/{}: {}", idx + 1, file_paths.len(), file_path);
+            info!(
+                "Android: Creating blob for file {}/{}: {}",
+                idx + 1,
+                file_paths.len(),
+                file_path
+            );
 
             // Create send args for this individual file
             let send_args = SendArgs {
@@ -380,7 +390,10 @@ pub mod android {
             }
         }
 
-        info!("Android: Created {} blob tickets, now creating code", blob_tickets.len());
+        info!(
+            "Android: Created {} blob tickets, now creating code",
+            blob_tickets.len()
+        );
 
         // Create a single code that contains all blob tickets
         let cfg = config();
@@ -388,7 +401,11 @@ pub mod android {
 
         match tokio::time::timeout(timeout_duration, create_blobs(blob_tickets)).await {
             Ok(Ok(code)) => {
-                info!("Android: Successfully created code {} for {} files", code, file_paths.len());
+                info!(
+                    "Android: Successfully created code {} for {} files",
+                    code,
+                    file_paths.len()
+                );
                 Ok(code)
             }
             Ok(Err(err)) => {

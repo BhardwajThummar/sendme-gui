@@ -8,6 +8,7 @@ mod android_compat;
 mod background_manager;
 mod config;
 mod events;
+mod ios_compat;
 mod logger;
 mod sender_state;
 mod sendme;
@@ -34,7 +35,13 @@ fn get_home_dir() -> std::path::PathBuf {
         android_compat::android::get_android_external_files_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(&cfg.platform.sdcard_fallback_path))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        // On iOS, use the Documents directory
+        ios_compat::ios::get_ios_documents_dir()
+            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(".")))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
     }
@@ -58,7 +65,13 @@ fn get_temp_dir() -> std::path::PathBuf {
         path.push("Temp");
         path
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        // On iOS, use the app's temp directory
+        ios_compat::ios::get_ios_temp_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("sendme-temp"))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         home.join(&cfg.storage.documents_folder)
@@ -407,7 +420,30 @@ fn get_downloads_dir() -> Result<String, String> {
             }
         }
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        logger::info!("Getting iOS downloads directory");
+        // On iOS, use the app's Documents/Downloads directory
+        match ios_compat::ios::get_ios_downloads_dir() {
+            Ok(path) => {
+                logger::debug!("iOS downloads path obtained: {:?}", path);
+                // Create the directory if it doesn't exist
+                if let Err(e) = std::fs::create_dir_all(&path) {
+                    logger::error!("Failed to create iOS downloads directory: {}", e);
+                    return Err(format!("Failed to create downloads directory: {}", e));
+                }
+                logger::debug!("iOS downloads directory created successfully");
+                let path_string = path.to_string_lossy().to_string();
+                logger::info!("Returning iOS downloads path: {}", path_string);
+                Ok(path_string)
+            }
+            Err(e) => {
+                logger::error!("Could not determine iOS downloads directory: {}", e);
+                Err(format!("Could not determine downloads directory: {}", e))
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         match dirs::download_dir() {
             Some(path) => Ok(path.to_string_lossy().to_string()),
