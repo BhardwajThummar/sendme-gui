@@ -1,5 +1,9 @@
 # SendMe GUI - Secure File Transfer
 
+[![CI](https://github.com/BhardwajThummar/sendme-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/BhardwajThummar/sendme-gui/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BhardwajThummar/sendme-gui)](https://github.com/BhardwajThummar/sendme-gui/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A modern, secure peer-to-peer file transfer application built with Tauri v2, React, and TypeScript.
 
 ## Features
@@ -10,6 +14,20 @@ A modern, secure peer-to-peer file transfer application built with Tauri v2, Rea
 - 🎨 **Beautiful UI**: Clean interface with Tailwind CSS
 - 🌐 **No Cloud Required**: Direct device-to-device transfers
 - 📊 **Transfer Status**: Real-time progress tracking
+
+## How sharing works
+
+Files are transferred directly between devices using the [Iroh](https://iroh.computer/)
+protocol — there's no cloud storage involved. To hand off the connection
+details (a "blob ticket") to the receiving device, this app supports two
+modes:
+
+- **No server configured (default)**: the sender gets the raw ticket as
+  text and a QR code; the receiver pastes it or scans it in-app.
+- **Server configured** (`BASE_URL` env var): the sender instead gets a
+  short numeric code, exchanged via a small backend that maps codes to
+  tickets. This is optional and not required to use the app — see
+  [docs/SERVER_API.md](docs/SERVER_API.md) if you want to self-host one.
 
 ## Quick Start
 
@@ -84,7 +102,7 @@ To create a release:
 yarn version:patch  # or minor/major
 
 # 2. Push tag to GitHub
-git push origin tauri-v2
+git push origin main
 git push origin v0.1.0  # Replace with your version
 ```
 
@@ -112,7 +130,8 @@ GitHub Actions will automatically build and publish the release. See [.github/RE
 
 ## Configuration
 
-Environment variables are configured in [.env](.env). See [.env.example](.env.example) for available options.
+Copy [.env.example](.env.example) to `.env` and adjust as needed — all values
+are optional and have sensible defaults.
 
 ## Development Tools
 
@@ -155,10 +174,8 @@ yarn prettier --write .
 
 ## Contributing
 
-1. Create a feature branch
-2. Make your changes
-3. Update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]`
-4. Submit a pull request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, coding standards, and
+the PR process.
 
 ## License
 

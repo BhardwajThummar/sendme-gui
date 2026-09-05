@@ -42,12 +42,12 @@ pub struct PlatformConfig {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ApiConfig {
-    /// Base URL for API calls
+    /// Base URL of a code-exchange server (see docs/SERVER_API.md). Empty
+    /// disables server-backed short codes; sharing falls back to raw
+    /// blob tickets (shown as text + QR).
     pub base_url: String,
     /// API timeout in seconds
     pub timeout_secs: u64,
-    /// Production base URL fallback
-    pub production_url: String,
 }
 
 /// Storage configuration
@@ -96,10 +96,8 @@ impl Default for PlatformConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            base_url: std::env::var("BASE_URL")
-                .unwrap_or_else(|_| "https://send.hindalert.com".to_string()),
+            base_url: env_or_default("BASE_URL", ""),
             timeout_secs: env_or_default_parsed("API_TIMEOUT_SECS", 30),
-            production_url: "https://send.hindalert.com".to_string(),
         }
     }
 }
@@ -175,7 +173,6 @@ mod tests {
     fn test_config_init() {
         let config = AppConfig::init();
         assert!(!config.platform.android_download_path.is_empty());
-        assert!(!config.api.base_url.is_empty());
         assert!(!config.storage.temp_dir_prefix.is_empty());
     }
 
