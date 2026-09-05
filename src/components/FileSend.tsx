@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { API_CONFIG, UI_CONFIG } from "@/config/app.config";
+import { API_CONFIG, FILE_TRANSFER_CONFIG, UI_CONFIG } from "@/config/app.config";
 import { resolveFileEntries } from "@/utils/fileSelection";
 import { logger } from "@/utils/logger";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, openAndroidDirectoryPicker, openAndroidFilePicker } from "@/utils/androidPicker";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
@@ -60,6 +61,10 @@ const FileSend: React.FC = () => {
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [sendCode, setSendCode] = useState<string>("");
+  // A raw blob ticket (no server configured) is far longer than the
+  // fixed-length short code a server hands back.
+  const isRawTicket = sendCode.length > FILE_TRANSFER_CONFIG.CODE_LENGTH;
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [importProgress, setImportProgress] = useState<number>(0);
   const [importStatus, setImportStatus] = useState<{
     currentFile: string;
@@ -133,6 +138,17 @@ const FileSend: React.FC = () => {
       cleanupPromise.then((cleanup) => cleanup());
     };
   }, []);
+
+  // Generate a QR code for the raw-ticket case (no server configured)
+  useEffect(() => {
+    if (!isRawTicket) {
+      setQrDataUrl("");
+      return;
+    }
+    QRCode.toDataURL(sendCode, { margin: 1, width: 240 })
+      .then(setQrDataUrl)
+      .catch((error) => logger.error("FileSend", "Failed to generate QR code", error));
+  }, [sendCode, isRawTicket]);
 
   // Format file size for display
   const formatFileSize = (bytes: number): string => {
@@ -345,23 +361,44 @@ const FileSend: React.FC = () => {
               )}
             </div>
             <h2 className="text-xl font-bold text-center">
-              {status === "sharing" ? "Sharing in Progress" : "Your Send Code"}
+              {status === "sharing"
+                ? "Sharing in Progress"
+                : isRawTicket
+                ? "Your Send Ticket"
+                : "Your Send Code"}
             </h2>
 
-            <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
-              {sendCode.split("").map((char, index) => (
-                <span
-                  key={index}
-                  className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
-                >
-                  {char}
-                </span>
-              ))}
-            </div>
+            {isRawTicket ? (
+              <div className="flex flex-col items-center gap-3 my-4 w-full">
+                {qrDataUrl && (
+                  <img
+                    src={qrDataUrl}
+                    alt="QR code for send ticket"
+                    className="rounded-lg border border-border bg-background p-2"
+                  />
+                )}
+                <p className="break-all text-xs font-mono bg-muted p-3 rounded-lg border border-border w-full text-center">
+                  {sendCode}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
+                {sendCode.split("").map((char, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
+                  >
+                    {char}
+                  </span>
+                ))}
+              </div>
+            )}
 
             <p className="text-muted-foreground text-sm text-center px-4">
               {status === "sharing"
                 ? "Someone is downloading your files..."
+                : isRawTicket
+                ? "Scan the QR code or copy the ticket to let them download your files"
                 : "Send this code to the recipient to let them download your files"}
             </p>
           </div>

@@ -51,6 +51,8 @@
     "shell:default",
     "fs:default",
     "store:default",
-    "dialog:default"
+    "dialog:default",
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel"
   ]
 }

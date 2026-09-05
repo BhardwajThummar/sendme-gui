@@ -961,6 +961,17 @@ struct GetBlobResponse {
 
 pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> {
     let cfg = config();
+
+    // No code-exchange server configured: hand back the raw ticket(s)
+    // directly. The caller displays this as text + QR instead of a short code.
+    if cfg.api.base_url.is_empty() {
+        info!(
+            "No BASE_URL configured, returning {} raw ticket(s)",
+            blobs.len()
+        );
+        return Ok(blobs.join(","));
+    }
+
     let client = Client::new();
     let payload = BlobRequest { blobs };
 
@@ -982,8 +993,46 @@ pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> 
     Ok(response.code)
 }
 
+/// True if every comma-separated segment of `code` parses as a raw blob
+/// ticket, meaning it was produced without a code-exchange server.
+fn looks_like_raw_tickets(code: &str) -> bool {
+    code.split(',')
+        .all(|segment| BlobTicket::from_str(segment).is_ok())
+}
+
+#[cfg(test)]
+mod code_format_tests {
+    use super::looks_like_raw_tickets;
+
+    #[test]
+    fn short_numeric_code_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets("123456"));
+    }
+
+    #[test]
+    fn empty_string_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets(""));
+    }
+
+    #[test]
+    fn garbage_text_is_not_a_raw_ticket() {
+        assert!(!looks_like_raw_tickets("not,a,ticket"));
+    }
+}
+
 pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
+    // Self-describing: a value made only of valid tickets was shared
+    // without a server, regardless of whether one is configured locally.
+    if looks_like_raw_tickets(&code) {
+        debug!("Code looks like raw ticket(s), skipping server lookup");
+        return Ok(code.split(',').map(|s| s.to_string()).collect());
+    }
+
     let cfg = config();
+    if cfg.api.base_url.is_empty() {
+        return Err("This code requires a server, but none is configured".into());
+    }
+
     let client = Client::new();
 
     debug!("Fetching blob with code: {}", code);
