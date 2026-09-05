@@ -607,12 +607,17 @@ pub fn run() {
         cleanup_sendme_dirs();
     }));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_barcode_scanner::init())
+        .plugin(tauri_plugin_shell::init());
+
+    // The barcode scanner plugin only ships an `init()` on mobile targets.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+
+    builder
         // Manage our shared sender state.
         .manage(Mutex::new(SenderState::default()))
         // Initialize the store plugin
