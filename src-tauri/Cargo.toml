@@ -27,7 +27,7 @@ serde_json = "1"
 async-channel = "2.3.1"
 clap = { version = "4.4.10", features = ["derive"] }
 console = "0.16.4"
-derive_more = { version = "1.0.0", features = [
+derive_more = { version = "2.1.1", features = [
     "display",
     "from_str"
 ] }
