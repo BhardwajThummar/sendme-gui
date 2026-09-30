@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { logger } from "@/utils/logger";
-import { isMobile } from "@/utils/platform";
-import { cancel, Format, scan } from "@tauri-apps/plugin-barcode-scanner";
+import { isIOS } from "@/utils/platform";
+import { cancel, Format, requestPermissions, scan } from "@tauri-apps/plugin-barcode-scanner";
 import jsQR from "jsqr";
 import { X } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
@@ -12,9 +12,10 @@ interface QrScannerProps {
 }
 
 /**
- * QR scan overlay. On mobile, delegates to the native camera scanner
- * plugin (its own full-screen UI). On desktop, captures the webcam via
- * getUserMedia and decodes frames locally with jsQR.
+ * QR scan overlay. On iOS, delegates to the native camera scanner plugin
+ * (its own full-screen UI). Everywhere else (desktop, Android) it captures
+ * the camera via getUserMedia and decodes frames locally with jsQR; the
+ * Android plugin needs Google Play Services to download its decoder.
  */
 const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
   const [error, setError] = useState<string>("");
@@ -24,10 +25,14 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
   const frameRef = useRef<number>(0);
 
   useEffect(() => {
-    if (isMobile()) {
+    if (isIOS()) {
       let cancelled = false;
 
-      scan({ formats: [Format.QRCode] })
+      requestPermissions()
+        .then((state) => {
+          if (state !== "granted") throw new Error(`Camera permission ${state}`);
+          return scan({ formats: [Format.QRCode] });
+        })
         .then((result) => {
           if (!cancelled) onDetected(result.content);
         })
@@ -42,13 +47,17 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
       };
     }
 
-    // Desktop: getUserMedia + jsQR
+    // Desktop/Android: getUserMedia + jsQR
     let stopped = false;
 
     const start = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         });
         streamRef.current = stream;
 
@@ -69,7 +78,9 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
             if (ctx) {
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const code = jsQR(imageData.data, imageData.width, imageData.height);
+              const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+              });
               if (code) {
                 onDetected(code.data);
                 return;
@@ -107,7 +118,7 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
         <X className="h-4 w-4" />
       </Button>
 
-      {isMobile() ? (
+      {isIOS() ? (
         <p className="text-sm text-muted-foreground">Opening camera...</p>
       ) : (
         <div className="w-full max-w-sm space-y-3">

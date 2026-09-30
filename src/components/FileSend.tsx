@@ -145,7 +145,7 @@ const FileSend: React.FC = () => {
       setQrDataUrl("");
       return;
     }
-    QRCode.toDataURL(sendCode, { margin: 1, width: 240 })
+    QRCode.toDataURL(sendCode, { margin: 2, width: 640, errorCorrectionLevel: "L" })
       .then(setQrDataUrl)
       .catch((error) => logger.error("FileSend", "Failed to generate QR code", error));
   }, [sendCode, isRawTicket]);
@@ -374,7 +374,7 @@ const FileSend: React.FC = () => {
                   <img
                     src={qrDataUrl}
                     alt="QR code for send ticket"
-                    className="rounded-lg border border-border bg-background p-2"
+                    className="rounded-lg border border-border bg-white p-2 w-full max-w-xs"
                   />
                 )}
                 <p className="break-all text-xs font-mono bg-muted p-3 rounded-lg border border-border w-full text-center">
