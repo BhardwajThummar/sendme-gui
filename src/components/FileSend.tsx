@@ -20,8 +20,7 @@ import {
 import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
-import { isAndroid, openAndroidDirectoryPicker, openAndroidFilePicker } from "@/utils/androidPicker";
-import { formatPathForDisplay } from "@/utils/pathFormatter";
+import { isAndroid, openAndroidFilePicker } from "@/utils/androidPicker";
 
 interface FileInfo {
   name: string;
@@ -231,51 +230,14 @@ const FileSend: React.FC = () => {
 
   const handleDirSelect = async () => {
     try {
-      if (isAndroid()) {
-        // On Android, use the custom directory picker
-        const uri = await openAndroidDirectoryPicker();
-        if (!uri) {
-          return; // User cancelled
-        }
+      const selected = await open({
+        multiple: true,
+        directory: true,
+        title: "Select Directories to Send",
+      });
 
-        setStatus("processing");
-        setStatusMessage("Processing directory...");
-
-        // Resolve the directory URI to get the local directory path
-        if (!window.FileResolverPlugin) {
-          throw new Error('FileResolverPlugin not available');
-        }
-
-        const response = JSON.parse(window.FileResolverPlugin.resolveDirectoryToPath(uri));
-
-        if (!response.success) {
-          throw new Error(response.error || 'Failed to resolve directory');
-        }
-
-        // Add the directory as a single entry
-        const formatted = {
-          name: response.originalName || "Folder",
-          displayName: formatPathForDisplay(response.path),
-          path: response.path,
-          size: typeof response.size === "number" ? formatFileSize(response.size) : "Calculating...",
-        };
-
-        appendResolvedFiles([formatted]);
-        setStatus("idle");
-        setStatusMessage("");
-
-        logger.info("FileSend", `Directory added: ${response.path}`);
-      } else {
-        // Use Tauri dialog for desktop
-        const selected = await open({
-          multiple: true,
-          directory: true,
-          title: "Select Directories to Send",
-        });
-
-        if (selected && Array.isArray(selected) && selected.length > 0) {
-          await processSelection(selected);
-        }
+      if (selected && Array.isArray(selected) && selected.length > 0) {
+        await processSelection(selected);
       }
     } catch (error) {
       logger.error("FileSend", "Error selecting directories", error);
@@ -468,21 +430,23 @@ const FileSend: React.FC = () => {
               </div>
             </Button>
 
-            <Button
-              variant="outline"
-              className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
-              onClick={handleDirSelect}
-              disabled={status === "processing"}
-            >
-              {status === "processing" ? (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              ) : (
-                <FolderOpen className="h-6 w-6 text-primary" />
-              )}
-              <div className="text-center">
-                <div className="font-medium text-xs">Select Folders</div>
-              </div>
-            </Button>
+            {!isAndroid() && (
+              <Button
+                variant="outline"
+                className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
+                onClick={handleDirSelect}
+                disabled={status === "processing"}
+              >
+                {status === "processing" ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                ) : (
+                  <FolderOpen className="h-6 w-6 text-primary" />
+                )}
+                <div className="text-center">
+                  <div className="font-medium text-xs">Select Folders</div>
+                </div>
+              </Button>
+            )}
           </div>
 
           {selectedFiles.length > 0 && (

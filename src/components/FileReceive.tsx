@@ -24,7 +24,7 @@ import {
 import React, { useEffect, useRef, useState } from "react";
 import { getDownloadsFolderPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
-import { isAndroid, openAndroidDirectoryPicker } from "@/utils/androidPicker";
+import { isAndroid } from "@/utils/androidPicker";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
 import QrScanner from "@/components/QrScanner";
 
@@ -302,37 +302,14 @@ const FileReceive: React.FC = () => {
     try {
       let selected: string | null = null;
 
-      if (isAndroid()) {
-        // On Android, use the custom directory picker
-        const uri = await openAndroidDirectoryPicker();
-        if (!uri) {
-          return; // User cancelled
-        }
+      const result = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Download Location",
+      });
 
-        // Resolve the directory URI to get the local directory path
-        if (!window.FileResolverPlugin) {
-          throw new Error('FileResolverPlugin not available');
-        }
-
-        const response = JSON.parse(window.FileResolverPlugin.resolveDirectoryToPath(uri));
-
-        if (!response.success) {
-          throw new Error(response.error || 'Failed to resolve directory');
-        }
-
-        selected = response.path;
-        logger.info("FileReceive", `Resolved Android directory to: ${selected}`);
-      } else {
-        // Desktop: use Tauri dialog
-        const result = await open({
-          directory: true,
-          multiple: false,
-          title: "Select Download Location",
-        });
-
-        if (result && !Array.isArray(result)) {
-          selected = result;
-        }
+      if (result && !Array.isArray(result)) {
+        selected = result;
       }
 
       if (selected) {
@@ -581,16 +558,18 @@ const FileReceive: React.FC = () => {
                 disabled={status === "processing"}
                 className="flex-1 border-border text-xs h-9"
               />
-              <Button
-                variant="outline"
-                onClick={handleBrowse}
-                disabled={status === "processing"}
-                className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
-                size="icon"
-                title="Browse for folder"
-              >
-                <FolderOpen className="h-4 w-4" />
-              </Button>
+              {!isAndroid() && (
+                <Button
+                  variant="outline"
+                  onClick={handleBrowse}
+                  disabled={status === "processing"}
+                  className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
+                  size="icon"
+                  title="Browse for folder"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              )}
             </div>
             {downloadPath && (
               <p className="text-xs text-muted-foreground">

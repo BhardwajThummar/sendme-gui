@@ -80,22 +80,11 @@ fn get_temp_dir() -> std::path::PathBuf {
 
     #[cfg(target_os = "android")]
     {
-        use std::path::PathBuf;
-        let mut path = if let Ok(external_storage) = std::env::var("EXTERNAL_STORAGE") {
-            let mut p = PathBuf::from(external_storage);
-            p.push("Android/data");
-            p.push(&cfg.platform.android_package_name);
-            p.push("files");
-            p
-        } else {
-            let mut p = PathBuf::from(&cfg.platform.sdcard_fallback_path);
-            p.push("Android/data");
-            p.push(&cfg.platform.android_package_name);
-            p.push("files");
-            p
-        };
-        path.push(format!("{}temp", cfg.storage.temp_dir_prefix));
-        path
+        // App-private internal storage is always writable. The external
+        // Android/data/<package> dir does not exist until the Java API
+        // creates it, so plain std::fs gets "Permission denied" there.
+        std::path::PathBuf::from(&cfg.platform.android_app_data_path)
+            .join(format!("{}temp", cfg.storage.temp_dir_prefix))
     }
     #[cfg(target_os = "ios")]
     {

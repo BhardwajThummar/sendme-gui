@@ -452,6 +452,79 @@ fn get_downloads_dir() -> Result<String, String> {
     }
 }
 
+#[derive(serde::Serialize)]
+struct ResolvedContent {
+    path: String,
+    name: String,
+    size: u64,
+}
+
+/// Copies a file picked on Android (a `content://` URI) into the app cache
+/// and returns a real path, since sendme needs plain filesystem paths.
+// ponytail: copies are not cleaned up until the OS clears the cache; a
+// per-transfer cleanup can hook into cleanup_temp_directory if this grows.
+#[tauri::command]
+fn resolve_content_uri(app: tauri::AppHandle, uri: String) -> Result<ResolvedContent, String> {
+    use tauri::Manager;
+    use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
+
+    let url = tauri::Url::parse(&uri).map_err(|e| format!("Invalid URI: {e}"))?;
+
+    // Content URIs rarely carry a display name; use the last path segment
+    // when it looks like one, otherwise fall back to a generic name.
+    let last = url
+        .path_segments()
+        .and_then(|s| s.last())
+        .unwrap_or_default();
+    let decoded = percent_encoding::percent_decode_str(last).decode_utf8_lossy();
+    let candidate = decoded.rsplit(['/', ':']).next().unwrap_or_default().trim();
+    let name = if candidate.contains('.') && !candidate.starts_with('.') {
+        candidate.to_string()
+    } else {
+        "file".to_string()
+    };
+
+    let mut src = app
+        .fs()
+        .open(FilePath::Url(url), OpenOptions::new().read(true).to_owned())
+        .map_err(|e| format!("Failed to open selected file: {e}"))?;
+
+    // MediaStore/Downloads hand back an fd for the real file, so its path
+    // gives the true name. Other providers (e.g. Drive) return pipes, which
+    // fail this check and keep the URI-derived name.
+    #[cfg(target_os = "android")]
+    let name = {
+        use std::os::fd::AsRawFd;
+        fs::read_link(format!("/proc/self/fd/{}", src.as_raw_fd()))
+            .ok()
+            .filter(|p| p.is_absolute())
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or(name)
+    };
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("picked")
+        .join(nanos.to_string());
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let dest = dir.join(&name);
+    let mut out = fs::File::create(&dest).map_err(|e| e.to_string())?;
+    let size = std::io::copy(&mut src, &mut out).map_err(|e| e.to_string())?;
+
+    Ok(ResolvedContent {
+        path: dest.to_string_lossy().into_owned(),
+        name,
+        size,
+    })
+}
+
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
     let path = Path::new(&path);
@@ -629,6 +702,7 @@ pub fn run() {
             receive_file_command,
             get_downloads_dir,
             get_file_size,
+            resolve_content_uri,
             cleanup_temp_directory,
             is_background_mode_enabled,
             enable_background_mode,
