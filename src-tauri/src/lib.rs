@@ -474,7 +474,7 @@ fn resolve_content_uri(app: tauri::AppHandle, uri: String) -> Result<ResolvedCon
     // when it looks like one, otherwise fall back to a generic name.
     let last = url
         .path_segments()
-        .and_then(|s| s.last())
+        .and_then(|mut s| s.next_back())
         .unwrap_or_default();
     let decoded = percent_encoding::percent_decode_str(last).decode_utf8_lossy();
     let candidate = decoded.rsplit(['/', ':']).next().unwrap_or_default().trim();
