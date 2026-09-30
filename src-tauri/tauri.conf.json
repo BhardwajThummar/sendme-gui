@@ -17,6 +17,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "entitlements": "entitlements.plist"
+    },
     "android": {
       "minSdkVersion": 29
     },
