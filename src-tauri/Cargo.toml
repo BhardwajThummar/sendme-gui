@@ -19,6 +19,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-fs = "2"
+percent-encoding = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-barcode-scanner = "2"
 
