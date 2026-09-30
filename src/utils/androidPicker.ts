@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { logger } from './logger';
 
@@ -29,6 +30,24 @@ export async function openAndroidFilePicker(multiple: boolean = true): Promise<s
         return uris;
     } catch (error) {
         logger.error('AndroidPicker', 'Error opening file picker', error);
+        throw error;
+    }
+}
+
+/**
+ * Open the Android folder picker. The chosen folder is copied into the app
+ * cache by the `pick_android_folder` command, since sendme needs real paths.
+ * @returns Path of the copied folder, or null if cancelled
+ */
+export async function openAndroidFolderPicker(): Promise<string | null> {
+    try {
+        const path = await invoke<string | null>('pick_android_folder');
+        if (!path) {
+            logger.info('AndroidPicker', 'Folder picker cancelled');
+        }
+        return path;
+    } catch (error) {
+        logger.error('AndroidPicker', 'Error opening folder picker', error);
         throw error;
     }
 }

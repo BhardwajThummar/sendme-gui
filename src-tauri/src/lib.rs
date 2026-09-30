@@ -452,6 +452,77 @@ fn get_downloads_dir() -> Result<String, String> {
     }
 }
 
+/// Lets the user pick a folder on Android (system folder picker) and copies
+/// it into the app cache, since sendme needs plain filesystem paths.
+/// Returns the copied folder's path, or None if the user cancelled.
+// ponytail: copies the whole tree before sending; very large folders take
+// time and cache space. Stream files on demand if that becomes a problem.
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn pick_android_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    use tauri_plugin_android_fs::{AndroidFsExt, Entry, FsUri};
+
+    let Some(root) = app
+        .android_fs_async()
+        .picker()
+        .pick_dir(None, false)
+        .await
+        .map_err(|e| format!("Failed to open folder picker: {e}"))?
+    else {
+        return Ok(None);
+    };
+
+    fn copy_tree(
+        api: &tauri_plugin_android_fs::api::api_sync::AndroidFs<tauri::Wry>,
+        dir: &FsUri,
+        dest: &Path,
+    ) -> Result<(), String> {
+        fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+        for entry in api.read_dir(dir).map_err(|e| e.to_string())? {
+            match entry {
+                Entry::Dir { uri, name, .. } => {
+                    copy_tree(api, &uri, &dest.join(name.replace('/', "_")))?
+                }
+                Entry::File { uri, name, .. } => {
+                    let mut src = api.open_file_readable(&uri).map_err(|e| e.to_string())?;
+                    let mut out = fs::File::create(dest.join(name.replace('/', "_")))
+                        .map_err(|e| e.to_string())?;
+                    std::io::copy(&mut src, &mut out).map_err(|e| e.to_string())?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let base = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("picked")
+        .join(nanos.to_string());
+
+    let worker = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let api = worker.android_fs();
+        let name = api.get_name_or_last_path_segment(&root).replace('/', "_");
+        let dest = base.join(if name.is_empty() {
+            "folder".into()
+        } else {
+            name
+        });
+        copy_tree(api, &root, &dest)?;
+        Ok(Some(dest.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(serde::Serialize)]
 struct ResolvedContent {
     path: String,
@@ -686,6 +757,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init());
 
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_android_fs::init());
+
     // The barcode scanner plugin only ships an `init()` on mobile targets.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
@@ -703,6 +777,8 @@ pub fn run() {
             get_downloads_dir,
             get_file_size,
             resolve_content_uri,
+            #[cfg(target_os = "android")]
+            pick_android_folder,
             cleanup_temp_directory,
             is_background_mode_enabled,
             enable_background_mode,
