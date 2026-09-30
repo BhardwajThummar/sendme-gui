@@ -663,15 +663,10 @@
     "@tailwindcss/oxide" "4.1.5"
     tailwindcss "4.1.5"
 
-"@tauri-apps/api@^2.0.0", "@tauri-apps/api@^2.5.0":
-  version "2.5.0"
-  resolved "https://registry.npmjs.org/@tauri-apps/api/-/api-2.5.0.tgz"
-  integrity sha512-Ldux4ip+HGAcPUmuLT8EIkk6yafl5vK0P0c0byzAKzxJh7vxelVtdPONjfgTm96PbN24yjZNESY8CKo8qniluA==
-
-"@tauri-apps/api@^2.11.0":
-  version "2.11.1"
-  resolved "https://registry.yarnpkg.com/@tauri-apps/api/-/api-2.11.1.tgz#cd6b13fc26403ca095a02e39ecdbec8048d2872d"
-  integrity sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==
+"@tauri-apps/api@^2.0.0", "@tauri-apps/api@^2.11.0", "@tauri-apps/api@^2.12.0", "@tauri-apps/api@^2.5.0":
+  version "2.12.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/api/-/api-2.12.0.tgz#9048cede2961ac8e255d2c023692a54b31bffd6a"
+  integrity sha512-fUSxFX8VABYe9W9K5ROdEaKVkNUFRcMSRofjruvaxztXA+I0XnQHcYHF8m/a6iExRUxsUf0HsFWhPBuH9IgzJw==
 
 "@tauri-apps/cli-darwin-arm64@2.5.0":
   version "2.5.0"
@@ -753,11 +748,11 @@
     "@tauri-apps/api" "^2.11.0"
 
 "@tauri-apps/plugin-dialog@~2":
-  version "2.2.1"
-  resolved "https://registry.npmjs.org/@tauri-apps/plugin-dialog/-/plugin-dialog-2.2.1.tgz"
-  integrity sha512-wZmCouo4PgTosh/UoejPw9DPs6RllS5Pp3fuOV2JobCu36mR5AXU2MzU9NZiVaFi/5Zfc8RN0IhcZHnksJ1o8A==
+  version "2.8.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-dialog/-/plugin-dialog-2.8.0.tgz#e514872852acdd030b95bd422283af636650f00c"
+  integrity sha512-HSSD5C8UFE9ijD1wue84F7jjaIReFmj8AAPtS+xyjYRltJafIc4BiWHY7SJ6vbbew6u+YljEJHfyNfy5VwywXg==
   dependencies:
-    "@tauri-apps/api" "^2.0.0"
+    "@tauri-apps/api" "^2.12.0"
 
 "@tauri-apps/plugin-fs@~2":
   version "2.2.1"
