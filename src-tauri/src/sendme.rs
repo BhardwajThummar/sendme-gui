@@ -698,26 +698,139 @@ fn get_export_path(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+/// What to do when a file being received already exists.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ConflictChoice {
+    Overwrite,
+    Rename,
+    Cancel,
+}
+
+lazy_static::lazy_static! {
+    /// Pending answer to the "file already exists" prompt, if one is open.
+    static ref CONFLICT_ANSWER: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<ConflictChoice>>> =
+        std::sync::Mutex::new(None);
+}
+
+/// Called by the UI with "overwrite", "rename" or "cancel".
+pub fn resolve_conflict(choice: &str) {
+    let choice = match choice {
+        "overwrite" => ConflictChoice::Overwrite,
+        "rename" => ConflictChoice::Rename,
+        _ => ConflictChoice::Cancel,
+    };
+    if let Some(tx) = CONFLICT_ANSWER.lock().ok().and_then(|mut g| g.take()) {
+        let _ = tx.send(choice);
+    }
+}
+
+/// Asks the user (via the window) what to do with `existing` files.
+/// Without a window there is nobody to ask, so keep both.
+async fn ask_conflict(window: Option<&tauri::Window>, existing: &[String]) -> ConflictChoice {
+    let Some(window) = window else {
+        return ConflictChoice::Rename;
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if let Ok(mut slot) = CONFLICT_ANSWER.lock() {
+        *slot = Some(tx);
+    }
+    let _ = window.emit(
+        "file_conflict",
+        crate::events::FileConflictEvent {
+            count: existing.len(),
+            names: existing.iter().take(5).cloned().collect(),
+        },
+    );
+    // A prompt nobody answers must not hang the transfer forever.
+    match tokio::time::timeout(Duration::from_secs(300), rx).await {
+        Ok(Ok(choice)) => choice,
+        _ => ConflictChoice::Cancel,
+    }
+}
+
+/// `name (n).ext` next to `target`, used when `name.ext` is already taken.
+fn numbered_path(target: &Path, n: u32) -> PathBuf {
+    let stem = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match target.extension() {
+        Some(ext) => format!("{stem} ({n}).{}", ext.to_string_lossy()),
+        None => format!("{stem} ({n})"),
+    };
+    target.with_file_name(name)
+}
+
 async fn export(
     db: impl iroh_blobs::store::Store,
     collection: Collection,
     storage_file_path: String,
+    window: Option<&tauri::Window>,
 ) -> anyhow::Result<()> {
     let root = PathBuf::from(storage_file_path);
+
+    let mut targets = Vec::new();
     for (name, hash) in collection.iter() {
-        let target = get_export_path(&root, name)?;
-        if target.exists() {
-            error!("Target {} already exists. Export stopped", target.display());
-            warn!("You can remove the file or directory and try again. The download will not be repeated");
-            anyhow::bail!("target {} already exists", target.display());
+        targets.push((name.clone(), *hash, get_export_path(&root, name)?));
+    }
+
+    // Ask once for the whole transfer if anything is already there.
+    let existing: Vec<String> = targets
+        .iter()
+        .filter(|(_, _, target)| target.exists())
+        .map(|(name, _, _)| name.clone())
+        .collect();
+    let choice = if existing.is_empty() {
+        ConflictChoice::Rename
+    } else {
+        ask_conflict(window, &existing).await
+    };
+    if choice == ConflictChoice::Cancel {
+        anyhow::bail!(
+            "Download cancelled: {} file(s) already exist",
+            existing.len()
+        );
+    }
+
+    for (_, hash, target) in targets {
+        if choice == ConflictChoice::Overwrite && target.is_file() {
+            tokio::fs::remove_file(&target).await?;
         }
-        db.export(
-            *hash,
-            target,
-            ExportMode::TryReference,
-            Box::new(move |_position| Ok(())),
-        )
-        .await?;
+        // Otherwise never overwrite: take the next free "name (n).ext". The
+        // create can also fail with EEXIST when the name is invisibly taken
+        // (e.g. reserved by Samsung's recycle bin on Android); that cannot
+        // be overwritten, so it falls through to the next free name too.
+        let mut candidate = target.clone();
+        let mut n = 0;
+        loop {
+            if candidate.exists() {
+                n += 1;
+            } else {
+                match db
+                    .export(
+                        hash,
+                        candidate.clone(),
+                        ExportMode::TryReference,
+                        Box::new(move |_position| Ok(())),
+                    )
+                    .await
+                {
+                    Ok(()) => break,
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::AlreadyExists
+                            || e.raw_os_error() == Some(17) =>
+                    {
+                        warn!("{} is taken, trying another name", candidate.display());
+                        n += 1;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            if n > 100 {
+                anyhow::bail!("could not find a free name for {}", target.display());
+            }
+            candidate = numbered_path(&target, n);
+        }
     }
     Ok(())
 }
@@ -1257,7 +1370,7 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
             info!("Downloading to: {}", first);
         }
     }
-    export(db, collection, storage_file_path.clone()).await?;
+    export(db, collection, storage_file_path.clone(), None).await?;
     tokio::fs::remove_dir_all(iroh_data_dir).await?;
     if args.common.verbose > 0 {
         info!(
@@ -1795,7 +1908,7 @@ async fn receive_single_blob(
         }
     }
 
-    export(db, collection, file_storage_path.to_string()).await?;
+    export(db, collection, file_storage_path.to_string(), Some(&window)).await?;
     tokio::fs::remove_dir_all(iroh_data_dir).await?;
 
     info!(
@@ -1826,5 +1939,27 @@ mod code_format_tests {
     #[test]
     fn garbage_text_is_not_a_raw_ticket() {
         assert!(!looks_like_raw_tickets("not,a,ticket"));
+    }
+}
+
+#[cfg(test)]
+mod export_name_tests {
+    use super::numbered_path;
+    use std::path::Path;
+
+    #[test]
+    fn numbers_before_the_extension() {
+        assert_eq!(
+            numbered_path(Path::new("/d/gemini/ai.py"), 1),
+            Path::new("/d/gemini/ai (1).py")
+        );
+        assert_eq!(
+            numbered_path(Path::new("/d/Makefile"), 2),
+            Path::new("/d/Makefile (2)")
+        );
+        assert_eq!(
+            numbered_path(Path::new("/d/a.tar.gz"), 1),
+            Path::new("/d/a.tar (1).gz")
+        );
     }
 }

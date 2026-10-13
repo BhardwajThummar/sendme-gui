@@ -75,3 +75,10 @@ pub struct ImportProgressEvent {
 //         format!("{}s", seconds)
 //     }
 // }
+
+// Event asking the user what to do when files to be saved already exist
+#[derive(Clone, Serialize)]
+pub struct FileConflictEvent {
+    pub count: usize,
+    pub names: Vec<String>,
+}

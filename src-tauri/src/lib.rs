@@ -596,6 +596,12 @@ fn resolve_content_uri(app: tauri::AppHandle, uri: String) -> Result<ResolvedCon
     })
 }
 
+/// Answer to the "file already exists" prompt: "overwrite", "rename" or "cancel".
+#[tauri::command]
+fn resolve_file_conflict(choice: String) {
+    sendme::resolve_conflict(&choice);
+}
+
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
     let path = Path::new(&path);
@@ -776,6 +782,7 @@ pub fn run() {
             receive_file_command,
             get_downloads_dir,
             get_file_size,
+            resolve_file_conflict,
             resolve_content_uri,
             #[cfg(target_os = "android")]
             pick_android_folder,
