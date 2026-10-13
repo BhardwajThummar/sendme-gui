@@ -523,6 +523,42 @@ async fn pick_android_folder(app: tauri::AppHandle) -> Result<Option<String>, St
     .map_err(|e| e.to_string())?
 }
 
+/// A save location picked on Android. `path` is what the app stores and later
+/// passes to the receive commands ("saf:" + the folder's persisted URI).
+#[cfg(target_os = "android")]
+#[derive(serde::Serialize)]
+struct SaveDir {
+    path: String,
+    name: String,
+}
+
+/// Lets the user pick where received files are saved (system folder picker)
+/// and keeps write access to it across restarts. None if the user cancelled.
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn pick_android_save_dir(app: tauri::AppHandle) -> Result<Option<SaveDir>, String> {
+    use tauri_plugin_android_fs::AndroidFsExt;
+
+    let api = app.android_fs_async();
+    let Some(dir) = api
+        .picker()
+        .pick_dir(None, false)
+        .await
+        .map_err(|e| format!("Failed to open folder picker: {e}"))?
+    else {
+        return Ok(None);
+    };
+    api.picker()
+        .persist_uri_permission(&dir)
+        .await
+        .map_err(|e| format!("Failed to keep access to the folder: {e}"))?;
+
+    Ok(Some(SaveDir {
+        name: api.get_name_or_last_path_segment(&dir).await,
+        path: format!("saf:{}", dir.to_json_string().map_err(|e| e.to_string())?),
+    }))
+}
+
 #[derive(serde::Serialize)]
 struct ResolvedContent {
     path: String,
@@ -786,6 +822,8 @@ pub fn run() {
             resolve_content_uri,
             #[cfg(target_os = "android")]
             pick_android_folder,
+            #[cfg(target_os = "android")]
+            pick_android_save_dir,
             cleanup_temp_directory,
             is_background_mode_enabled,
             enable_background_mode,
