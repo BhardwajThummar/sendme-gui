@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { logger } from './logger';
+import { fileUrlToPath } from './paths';
 
 export interface ResolvedFileEntry {
     path: string;
@@ -63,7 +64,7 @@ export async function resolveFileEntries(selection: string | string[] | null): P
         return [];
     }
 
-    const entries = normalizeSelection(selection);
+    const entries = normalizeSelection(selection).map(fileUrlToPath);
 
     if (!entries.length) {
         return [];

@@ -5,12 +5,16 @@ import { STORAGE_CONFIG } from '@/config/app.config';
 
 let storePromise = Store.load(STORAGE_CONFIG.STORE_NAME);
 
+// iOS gives the app a new data-container path when it is reinstalled or restored,
+// so a saved path inside the old container points nowhere useful. Re-derive it.
+const IOS_APP_CONTAINER = /\/Containers\/Data\/Application\/[0-9A-F-]{36}\//i;
+
 export async function getDownloadsFolderPath(): Promise<string> {
   try {
     const store = await storePromise;
 
     const savedPath = await store.get<string>(STORAGE_CONFIG.DOWNLOAD_PATH_KEY);
-    if (savedPath) {
+    if (savedPath && !IOS_APP_CONTAINER.test(savedPath)) {
       return savedPath;
     }
 
@@ -46,5 +50,18 @@ export async function getSavedDownloadPath(): Promise<string | undefined> {
   } catch (error) {
     logger.error('Paths', 'Error reading saved download path', error);
     return undefined;
+  }
+}
+
+/**
+ * iOS pickers return `file://` URLs (percent-encoded); the backend wants plain
+ * paths. Other platforms already return paths, which pass through unchanged.
+ */
+export function fileUrlToPath(value: string): string {
+  if (!value.startsWith('file://')) return value;
+  try {
+    return decodeURIComponent(new URL(value).pathname);
+  } catch {
+    return value;
   }
 }

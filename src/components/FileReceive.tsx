@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
-import { getDownloadsFolderPath, getSavedDownloadPath, saveDownloadPath } from "../utils/paths";
+import { fileUrlToPath, getDownloadsFolderPath, getSavedDownloadPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, pickAndroidSaveDir } from "@/utils/androidPicker";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
@@ -344,7 +344,7 @@ const FileReceive: React.FC = () => {
       });
 
       if (result && !Array.isArray(result)) {
-        selected = result;
+        selected = fileUrlToPath(result);
       }
 
       if (selected) {
