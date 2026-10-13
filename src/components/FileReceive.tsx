@@ -70,6 +70,8 @@ const FileReceive: React.FC = () => {
   // Raw ticket, pasted or scanned (no server configured case)
   const [ticketInput, setTicketInput] = useState<string>("");
   const [showScanner, setShowScanner] = useState<boolean>(false);
+  // Files that already exist in the save location; asks what to do
+  const [conflict, setConflict] = useState<{ count: number; names: string[] } | null>(null);
 
   // Live transfer stats
   const [liveStats, setLiveStats] = useState<{
@@ -209,6 +211,14 @@ const FileReceive: React.FC = () => {
         })
       );
 
+      // Listen for files that already exist (the transfer waits for an answer)
+      unlisteners.push(
+        await listen<{ count: number; names: string[] }>("file_conflict", (event) => {
+          logger.info("FileReceive", "File conflict", event.payload);
+          setConflict(event.payload);
+        })
+      );
+
       // Listen for download errors
       unlisteners.push(
         await listen<string>("download_error", (event) => {
@@ -295,6 +305,15 @@ const FileReceive: React.FC = () => {
       if (inputRefs.current[lastIndex]) {
         inputRefs.current[lastIndex]?.focus();
       }
+    }
+  };
+
+  const answerConflict = async (choice: "overwrite" | "rename" | "cancel") => {
+    setConflict(null);
+    try {
+      await invoke("resolve_file_conflict", { choice });
+    } catch (error) {
+      logger.error("FileReceive", "Failed to answer file conflict", error);
     }
   };
 
@@ -420,6 +439,35 @@ const FileReceive: React.FC = () => {
           }}
           onClose={() => setShowScanner(false)}
         />
+      )}
+      {conflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
+          <div className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-background p-5 shadow-lg">
+            <h3 className="text-base font-semibold">
+              {conflict.count === 1 ? "A file already exists" : `${conflict.count} files already exist`}
+            </h3>
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {conflict.names.map((name) => (
+                <li key={name} className="truncate font-mono">
+                  {name}
+                </li>
+              ))}
+              {conflict.count > conflict.names.length && (
+                <li>…and {conflict.count - conflict.names.length} more</li>
+              )}
+            </ul>
+            <p className="text-sm">Overwrite them, or keep both by saving the new ones with a number?</p>
+            <div className="flex flex-col gap-2">
+              <Button onClick={() => answerConflict("rename")}>Keep both</Button>
+              <Button variant="outline" onClick={() => answerConflict("overwrite")}>
+                Overwrite
+              </Button>
+              <Button variant="ghost" onClick={() => answerConflict("cancel")}>
+                Cancel download
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
       {downloadComplete ? (
         <div className="space-y-6">
