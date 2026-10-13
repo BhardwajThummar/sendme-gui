@@ -20,6 +20,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-fs = "2"
 percent-encoding = "2"
+# netdev 0.31 (via iroh) imports libc::RTAX_MAX, which libc 0.2.190 moved out of
+# the crate root, breaking iOS builds. Drop this once iroh/netdev are updated.
+libc = ">=0.2.150, <0.2.190"
 tauri-plugin-shell = "2"
 tauri-plugin-barcode-scanner = "2"
 
