@@ -221,6 +221,60 @@ impl Display for RelayModeOption {
     }
 }
 
+/// Resolves the relay mode, replacing `Default` with only the default relays
+/// that accept a TCP connection on 443.
+///
+/// iroh picks its home relay by latency and never switches if that relay
+/// turns out to be unreachable (some networks answer pings but drop TCP to a
+/// given relay). Probing first keeps both peers on a relay they can use.
+/// Falls back to the full default map when none respond.
+// ponytail: one-shot probe at endpoint creation; no re-probing if the
+// network changes mid-session.
+async fn resolve_relay_mode(option: RelayModeOption) -> RelayMode {
+    if !matches!(option, RelayModeOption::Default) {
+        return option.into();
+    }
+
+    let probes = iroh::defaults::prod::default_relay_map()
+        .nodes()
+        .cloned()
+        .map(|node| async move {
+            let host = node
+                .url
+                .host_str()
+                .unwrap_or_default()
+                .trim_end_matches('.')
+                .to_string();
+            let port = node.url.port_or_known_default().unwrap_or(443);
+            let ok = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                tokio::net::TcpStream::connect((host.as_str(), port)),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+            (node, ok)
+        })
+        .collect::<Vec<_>>();
+
+    let reachable: Vec<_> = futures::future::join_all(probes)
+        .await
+        .into_iter()
+        .filter_map(|(node, ok)| ok.then_some(node))
+        .collect();
+
+    match RelayMap::from_nodes(reachable) {
+        Ok(map) if !map.is_empty() => {
+            info!("Using {} reachable relay(s)", map.len());
+            RelayMode::Custom(map)
+        }
+        _ => {
+            warn!("No relay passed the reachability probe; using the default relay map");
+            RelayMode::Default
+        }
+    }
+}
+
 impl From<RelayModeOption> for RelayMode {
     fn from(value: RelayModeOption) -> Self {
         match value {
@@ -1134,7 +1188,7 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
     let mut builder = Endpoint::builder()
         .alpns(vec![])
         .secret_key(secret_key)
-        .relay_mode(args.common.relay.into());
+        .relay_mode(resolve_relay_mode(args.common.relay).await);
 
     if ticket.node_addr().relay_url.is_none() && ticket.node_addr().direct_addresses.is_empty() {
         builder = builder.add_discovery(|_| Some(DnsDiscovery::n0_dns()));
@@ -1231,7 +1285,7 @@ pub async fn start_send(
     let mut builder = Endpoint::builder()
         .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
         .secret_key(secret_key)
-        .relay_mode(args.common.relay.into());
+        .relay_mode(resolve_relay_mode(args.common.relay).await);
 
     if args.ticket_type == AddrInfoOptions::Id {
         builder =
@@ -1607,7 +1661,7 @@ async fn receive_single_blob(
     let mut builder = Endpoint::builder()
         .alpns(vec![])
         .secret_key(secret_key)
-        .relay_mode(RelayModeOption::Default.into());
+        .relay_mode(resolve_relay_mode(RelayModeOption::Default).await);
 
     if ticket.node_addr().relay_url.is_none() && ticket.node_addr().direct_addresses.is_empty() {
         builder = builder.add_discovery(|_| Some(DnsDiscovery::n0_dns()));
