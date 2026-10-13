@@ -37,3 +37,14 @@ export async function saveDownloadPath(path: string): Promise<void> {
     logger.error('Paths', 'Error saving download path', error);
   }
 }
+
+/** The saved download path, or undefined if the user never chose one. */
+export async function getSavedDownloadPath(): Promise<string | undefined> {
+  try {
+    const store = await storePromise;
+    return await store.get<string>(STORAGE_CONFIG.DOWNLOAD_PATH_KEY);
+  } catch (error) {
+    logger.error('Paths', 'Error reading saved download path', error);
+    return undefined;
+  }
+}

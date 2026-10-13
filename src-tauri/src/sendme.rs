@@ -767,8 +767,102 @@ async fn export(
     storage_file_path: String,
     window: Option<&tauri::Window>,
 ) -> anyhow::Result<()> {
-    let root = PathBuf::from(storage_file_path);
+    // On Android the user can pick a save folder; it is a content URI that
+    // plain file APIs cannot write to, so those files are delivered through
+    // the Storage Access Framework (see export_to_saf).
+    #[cfg(target_os = "android")]
+    if let Some(json) = storage_file_path.strip_prefix("saf:") {
+        let window = window.context("saving to a picked folder needs the app window")?;
+        return export_to_saf(db, collection, json, window).await;
+    }
+    export_to_path(db, collection, PathBuf::from(storage_file_path), window).await
+}
 
+/// Receives into app-private staging with the normal export, then copies the
+/// files into the folder the user picked, asking about clashes once.
+#[cfg(target_os = "android")]
+async fn export_to_saf(
+    db: impl iroh_blobs::store::Store,
+    collection: Collection,
+    tree_json: &str,
+    window: &tauri::Window,
+) -> anyhow::Result<()> {
+    use tauri::Manager;
+    use tauri_plugin_android_fs::{AndroidFsExt, FsUri};
+
+    let tree = FsUri::from_json_str(tree_json).context("the saved save-location is not valid")?;
+    let api = window.app_handle().android_fs_async();
+
+    let staging = CWD
+        .join("saf-staging")
+        .join(HEXLOWER.encode(&rand::thread_rng().gen::<[u8; 8]>()));
+    export_to_path(db, collection, staging.clone(), None).await?;
+
+    let result = async {
+        let files: Vec<String> = WalkDir::new(&staging)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .filter_map(|e| {
+                e.path()
+                    .strip_prefix(&staging)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+
+        let mut existing = Vec::new();
+        for rel in &files {
+            if api.resolve_file_uri(&tree, rel).await.is_ok() {
+                existing.push(rel.clone());
+            }
+        }
+        let choice = if existing.is_empty() {
+            ConflictChoice::Rename
+        } else {
+            ask_conflict(Some(window), &existing).await
+        };
+        if choice == ConflictChoice::Cancel {
+            anyhow::bail!(
+                "Download cancelled: {} file(s) already exist",
+                existing.len()
+            );
+        }
+
+        for rel in &files {
+            // Overwrite reuses the existing file; otherwise create_new_file
+            // makes a new one and numbers the name if it is taken.
+            let dest = match api.resolve_file_uri(&tree, rel).await {
+                Ok(uri) if choice == ConflictChoice::Overwrite => uri,
+                _ => api
+                    .create_new_file(&tree, rel, None)
+                    .await
+                    .with_context(|| format!("create {rel} in the chosen folder"))?,
+            };
+            let mut out = api
+                .open_file_writable(&dest)
+                .await
+                .with_context(|| format!("open {rel} for writing"))?;
+            let from = staging.join(rel);
+            tokio::task::spawn_blocking(move || {
+                std::io::copy(&mut std::fs::File::open(from)?, &mut out)
+            })
+            .await??;
+        }
+        anyhow::Ok(())
+    }
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    result
+}
+
+async fn export_to_path(
+    db: impl iroh_blobs::store::Store,
+    collection: Collection,
+    root: PathBuf,
+    window: Option<&tauri::Window>,
+) -> anyhow::Result<()> {
     let mut targets = Vec::new();
     for (name, hash) in collection.iter() {
         targets.push((name.clone(), *hash, get_export_path(&root, name)?));
@@ -1370,8 +1464,11 @@ pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Re
             info!("Downloading to: {}", first);
         }
     }
-    export(db, collection, storage_file_path.clone(), None).await?;
-    tokio::fs::remove_dir_all(iroh_data_dir).await?;
+    let exported = export(db, collection, storage_file_path.clone(), None).await;
+    // Always drop the work dir: it is named after the content, so a leftover
+    // one (e.g. after a cancelled export) would poison the next receive.
+    let _ = tokio::fs::remove_dir_all(iroh_data_dir).await;
+    exported?;
     if args.common.verbose > 0 {
         info!(
             "Downloaded {} files, {}. Took {} ({}/s)",
@@ -1908,8 +2005,11 @@ async fn receive_single_blob(
         }
     }
 
-    export(db, collection, file_storage_path.to_string(), Some(&window)).await?;
-    tokio::fs::remove_dir_all(iroh_data_dir).await?;
+    let exported = export(db, collection, file_storage_path.to_string(), Some(&window)).await;
+    // Always drop the work dir: it is named after the content, so a leftover
+    // one (e.g. after a cancelled export) would poison the next receive.
+    let _ = tokio::fs::remove_dir_all(iroh_data_dir).await;
+    exported?;
 
     info!(
         "Downloaded {} files, {}. Took {} ({}/s)",

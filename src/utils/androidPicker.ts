@@ -51,3 +51,18 @@ export async function openAndroidFolderPicker(): Promise<string | null> {
         throw error;
     }
 }
+
+/**
+ * Open the Android folder picker to choose where received files are saved.
+ * The returned `path` ("saf:..." ) is stored and passed to the receive
+ * commands as is; `name` is the folder's display name.
+ * @returns The chosen location, or null if cancelled
+ */
+export async function pickAndroidSaveDir(): Promise<{ path: string; name: string } | null> {
+    try {
+        return await invoke<{ path: string; name: string } | null>('pick_android_save_dir');
+    } catch (error) {
+        logger.error('AndroidPicker', 'Error picking save folder', error);
+        throw error;
+    }
+}

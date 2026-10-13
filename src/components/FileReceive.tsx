@@ -22,9 +22,9 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
-import { getDownloadsFolderPath, saveDownloadPath } from "../utils/paths";
+import { getDownloadsFolderPath, getSavedDownloadPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
-import { isAndroid } from "@/utils/androidPicker";
+import { isAndroid, pickAndroidSaveDir } from "@/utils/androidPicker";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
 import QrScanner from "@/components/QrScanner";
 
@@ -94,7 +94,8 @@ const FileReceive: React.FC = () => {
 
     setIsAndroid(isAndroidPlatform);
 
-    // On Android, immediately set the default path to system Downloads
+    // On Android, start from the system Downloads folder; a folder the user
+    // picked earlier replaces it as soon as it is read from storage.
     if (isAndroidPlatform) {
       setDownloadPath(PLATFORM_CONFIG.ANDROID_DOWNLOAD_PATH);
       logger.info(
@@ -105,6 +106,10 @@ const FileReceive: React.FC = () => {
 
     const initPath = async () => {
       if (isAndroidPlatform) {
+        const saved = await getSavedDownloadPath();
+        if (saved?.startsWith("saf:")) {
+          setDownloadPath(saved);
+        }
         return;
       }
 
@@ -321,6 +326,17 @@ const FileReceive: React.FC = () => {
     try {
       let selected: string | null = null;
 
+      if (isAndroid()) {
+        // System folder picker; the result is kept as a persisted folder grant
+        const dir = await pickAndroidSaveDir();
+        if (dir) {
+          setDownloadPath(dir.path);
+          await saveDownloadPath(dir.path);
+          logger.info("FileReceive", `Save location updated to: ${dir.name}`);
+        }
+        return;
+      }
+
       const result = await open({
         directory: true,
         multiple: false,
@@ -523,7 +539,7 @@ const FileReceive: React.FC = () => {
                 Your file has been saved to:
               </p>
               <div className="bg-muted p-2 rounded-md text-xs font-mono break-all border border-border">
-                {downloadPath}
+                {downloadPath.startsWith("saf:") ? formatPathForDisplay(downloadPath) : downloadPath}
               </div>
             </div>
           </div>
@@ -600,24 +616,23 @@ const FileReceive: React.FC = () => {
             <div className="flex items-center gap-2">
               <Input
                 type="text"
-                value={downloadPath}
+                value={downloadPath.startsWith("saf:") ? formatPathForDisplay(downloadPath) : downloadPath}
                 onChange={(e) => setDownloadPath(e.target.value)}
+                readOnly={downloadPath.startsWith("saf:")}
                 placeholder="Download location"
                 disabled={status === "processing"}
                 className="flex-1 border-border text-xs h-9"
               />
-              {!isAndroid() && (
-                <Button
-                  variant="outline"
-                  onClick={handleBrowse}
-                  disabled={status === "processing"}
-                  className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
-                  size="icon"
-                  title="Browse for folder"
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={handleBrowse}
+                disabled={status === "processing"}
+                className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
+                size="icon"
+                title="Browse for folder"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
             </div>
             {downloadPath && (
               <p className="text-xs text-muted-foreground">
