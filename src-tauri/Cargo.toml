@@ -28,7 +28,7 @@ serde_json = "1"
 async-channel = "2.3.1"
 clap = { version = "4.4.10", features = ["derive"] }
 console = "0.16.4"
-derive_more = { version = "1.0.0", features = [
+derive_more = { version = "2.1.1", features = [
     "display",
     "from_str"
 ] }
@@ -48,7 +48,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 walkdir = "2.4.0"
 data-encoding = "2.6.0"
 n0-future = "0.1.2"
-dirs = "5.0"
+dirs = "7.0"
 lazy_static = "1.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 dotenv = "0.15.0"
