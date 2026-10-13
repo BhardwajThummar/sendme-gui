@@ -659,8 +659,15 @@ async fn import_with_window(
             let db = db.clone();
             let progress = progress.clone();
             async move {
+                // iOS hands out a temporary copy of the picked file that the
+                // system deletes soon after, so referencing it in place would
+                // leave nothing to serve; copy into the store there instead.
+                #[cfg(target_os = "ios")]
+                let mode = ImportMode::Copy;
+                #[cfg(not(target_os = "ios"))]
+                let mode = ImportMode::TryReference;
                 let (temp_tag, file_size) = db
-                    .import_file(path, ImportMode::TryReference, BlobFormat::Raw, progress)
+                    .import_file(path, mode, BlobFormat::Raw, progress)
                     .await?;
                 anyhow::Ok((name, temp_tag, file_size))
             }
