@@ -21,6 +21,7 @@ import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, openAndroidFilePicker, openAndroidFolderPicker } from "@/utils/androidPicker";
+import { isIOS } from "@/utils/platform";
 
 interface FileInfo {
   name: string;
@@ -444,21 +445,23 @@ const FileSend: React.FC = () => {
               </div>
             </Button>
 
-            <Button
-              variant="outline"
-              className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
-              onClick={handleDirSelect}
-              disabled={status === "processing"}
-            >
-              {status === "processing" ? (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              ) : (
-                <FolderOpen className="h-6 w-6 text-primary" />
-              )}
-              <div className="text-center">
-                <div className="font-medium text-xs">Select Folders</div>
-              </div>
-            </Button>
+            {!isIOS() && (
+              <Button
+                variant="outline"
+                className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
+                onClick={handleDirSelect}
+                disabled={status === "processing"}
+              >
+                {status === "processing" ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                ) : (
+                  <FolderOpen className="h-6 w-6 text-primary" />
+                )}
+                <div className="text-center">
+                  <div className="font-medium text-xs">Select Folders</div>
+                </div>
+              </Button>
+            )}
           </div>
 
           {selectedFiles.length > 0 && (

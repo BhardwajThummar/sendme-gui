@@ -25,6 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { fileUrlToPath, getDownloadsFolderPath, getSavedDownloadPath, saveDownloadPath } from "../utils/paths";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, pickAndroidSaveDir } from "@/utils/androidPicker";
+import { isIOS } from "@/utils/platform";
 import { formatPathForDisplay } from "@/utils/pathFormatter";
 import QrScanner from "@/components/QrScanner";
 
@@ -623,16 +624,18 @@ const FileReceive: React.FC = () => {
                 disabled={status === "processing"}
                 className="flex-1 border-border text-xs h-9"
               />
-              <Button
-                variant="outline"
-                onClick={handleBrowse}
-                disabled={status === "processing"}
-                className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
-                size="icon"
-                title="Browse for folder"
-              >
-                <FolderOpen className="h-4 w-4" />
-              </Button>
+              {!isIOS() && (
+                <Button
+                  variant="outline"
+                  onClick={handleBrowse}
+                  disabled={status === "processing"}
+                  className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
+                  size="icon"
+                  title="Browse for folder"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              )}
             </div>
             {downloadPath && (
               <p className="text-xs text-muted-foreground">
