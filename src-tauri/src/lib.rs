@@ -559,6 +559,61 @@ async fn pick_android_save_dir(app: tauri::AppHandle) -> Result<Option<SaveDir>,
     }))
 }
 
+/// A save location picked on iOS: `path` is what the app stores and later
+/// passes to the receive commands ("ios:" + JSON with the folder bookmark).
+#[cfg(target_os = "ios")]
+#[derive(serde::Serialize)]
+struct IosSaveDir {
+    path: String,
+    name: String,
+}
+
+/// Lets the user pick where received files are saved (system folder picker)
+/// and keeps access to it across restarts. None if the user cancelled.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn pick_ios_save_dir(app: tauri::AppHandle) -> Result<Option<IosSaveDir>, String> {
+    use tauri_plugin_ios_folder::IosFolderExt;
+
+    let Some(folder) = app.ios_folder().pick().await? else {
+        return Ok(None);
+    };
+    let json = serde_json::json!({ "name": folder.name, "bookmark": folder.bookmark });
+    Ok(Some(IosSaveDir {
+        path: format!("ios:{json}"),
+        name: folder.name,
+    }))
+}
+
+/// Lets the user pick a folder to send and copies it into the app cache,
+/// since sendme needs plain filesystem paths. Returns the copy's path, or
+/// None if the user cancelled.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn pick_ios_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    use tauri_plugin_ios_folder::IosFolderExt;
+
+    let Some(folder) = app.ios_folder().pick().await? else {
+        return Ok(None);
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let dest = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("picked")
+        .join(nanos.to_string());
+    let path = app
+        .ios_folder()
+        .copy_out(&folder.bookmark, &dest.to_string_lossy())
+        .await?;
+    Ok(Some(path))
+}
+
 #[derive(serde::Serialize)]
 struct ResolvedContent {
     path: String,
@@ -802,6 +857,9 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.plugin(tauri_plugin_android_fs::init());
 
+    #[cfg(target_os = "ios")]
+    let builder = builder.plugin(tauri_plugin_ios_folder::init());
+
     // The barcode scanner plugin only ships an `init()` on mobile targets.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
@@ -824,6 +882,10 @@ pub fn run() {
             pick_android_folder,
             #[cfg(target_os = "android")]
             pick_android_save_dir,
+            #[cfg(target_os = "ios")]
+            pick_ios_folder,
+            #[cfg(target_os = "ios")]
+            pick_ios_save_dir,
             cleanup_temp_directory,
             is_background_mode_enabled,
             enable_background_mode,

@@ -22,6 +22,7 @@ import QRCode from "qrcode";
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, openAndroidFilePicker, openAndroidFolderPicker } from "@/utils/androidPicker";
 import { isIOS } from "@/utils/platform";
+import { pickIosFolderToSend } from "@/utils/iosPicker";
 
 interface FileInfo {
   name: string;
@@ -245,6 +246,20 @@ const FileSend: React.FC = () => {
         return;
       }
 
+      if (isIOS()) {
+        // The picked folder is copied into app storage and comes back as a real path
+        setStatus("processing");
+        setStatusMessage("Copying folder...");
+        const path = await pickIosFolderToSend();
+        if (path) {
+          await processSelection([path]);
+        } else {
+          setStatus("idle");
+          setStatusMessage("");
+        }
+        return;
+      }
+
       const selected = await open({
         multiple: true,
         directory: true,
@@ -445,23 +460,21 @@ const FileSend: React.FC = () => {
               </div>
             </Button>
 
-            {!isIOS() && (
-              <Button
-                variant="outline"
-                className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
-                onClick={handleDirSelect}
-                disabled={status === "processing"}
-              >
-                {status === "processing" ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                ) : (
-                  <FolderOpen className="h-6 w-6 text-primary" />
-                )}
-                <div className="text-center">
-                  <div className="font-medium text-xs">Select Folders</div>
-                </div>
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              className="h-auto py-4 flex flex-col items-center gap-2 border-border hover:border-primary hover:bg-muted"
+              onClick={handleDirSelect}
+              disabled={status === "processing"}
+            >
+              {status === "processing" ? (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              ) : (
+                <FolderOpen className="h-6 w-6 text-primary" />
+              )}
+              <div className="text-center">
+                <div className="font-medium text-xs">Select Folders</div>
+              </div>
+            </Button>
           </div>
 
           {selectedFiles.length > 0 && (

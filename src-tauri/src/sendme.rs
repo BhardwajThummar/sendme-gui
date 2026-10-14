@@ -782,7 +782,86 @@ async fn export(
         let window = window.context("saving to a picked folder needs the app window")?;
         return export_to_saf(db, collection, json, window).await;
     }
+    // Same idea on iOS: the user can pick a folder outside the app sandbox,
+    // stored as a bookmark (see export_to_ios_folder).
+    #[cfg(target_os = "ios")]
+    if let Some(json) = storage_file_path.strip_prefix("ios:") {
+        let window = window.context("saving to a picked folder needs the app window")?;
+        return export_to_ios_folder(db, collection, json, window).await;
+    }
     export_to_path(db, collection, PathBuf::from(storage_file_path), window).await
+}
+
+/// Receives into app-private staging with the normal export, then copies the
+/// files into the folder the user picked (via its bookmark), asking about
+/// clashes once.
+#[cfg(target_os = "ios")]
+async fn export_to_ios_folder(
+    db: impl iroh_blobs::store::Store,
+    collection: Collection,
+    location_json: &str,
+    window: &tauri::Window,
+) -> anyhow::Result<()> {
+    use tauri::Manager;
+    use tauri_plugin_ios_folder::IosFolderExt;
+
+    #[derive(Deserialize)]
+    struct Location {
+        bookmark: String,
+    }
+    let bookmark = serde_json::from_str::<Location>(location_json)
+        .context("the saved save-location is not valid")?
+        .bookmark;
+    let app = window.app_handle();
+
+    let staging = CWD
+        .join("ios-staging")
+        .join(HEXLOWER.encode(&rand::thread_rng().gen::<[u8; 8]>()));
+    export_to_path(db, collection, staging.clone(), None).await?;
+
+    let result = async {
+        let files: Vec<String> = WalkDir::new(&staging)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .filter_map(|e| {
+                e.path()
+                    .strip_prefix(&staging)
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+            .collect();
+
+        let existing = app
+            .ios_folder()
+            .existing(&bookmark, &files)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let choice = if existing.is_empty() {
+            ConflictChoice::Rename
+        } else {
+            ask_conflict(Some(window), &existing).await
+        };
+        if choice == ConflictChoice::Cancel {
+            anyhow::bail!(
+                "Download cancelled: {} file(s) already exist",
+                existing.len()
+            );
+        }
+
+        app.ios_folder()
+            .copy_in(
+                &bookmark,
+                &staging.to_string_lossy(),
+                choice == ConflictChoice::Overwrite,
+            )
+            .await
+            .map_err(anyhow::Error::msg)
+    }
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    result
 }
 
 /// Receives into app-private staging with the normal export, then copies the
