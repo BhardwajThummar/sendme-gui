@@ -253,7 +253,7 @@ pub mod android {
         file_storage_path: String,
         verbose: bool,
         window: tauri::Window,
-    ) -> Result<String, String> {
+    ) -> Result<crate::sendme::ReceiveSummary, String> {
         use crate::sendme::receive_file_with_progress;
 
         info!("Android: Starting receive_file_minimal with progress tracking");
@@ -262,9 +262,9 @@ pub mod android {
 
         // Use the desktop's progress-aware receive function
         match receive_file_with_progress(ticket, file_storage_path, verbose, window).await {
-            Ok(_) => {
+            Ok(summary) => {
                 info!("Android: File received successfully");
-                Ok("success".to_string())
+                Ok(summary)
             }
             Err(e) => {
                 let err_msg = format!("Failed to receive file: {}", e);

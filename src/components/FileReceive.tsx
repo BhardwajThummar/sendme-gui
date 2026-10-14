@@ -206,9 +206,12 @@ const FileReceive: React.FC = () => {
             totalFiles: files_count,
             totalSize: formatBytes(total_bytes),
             elapsedTime: formatTime(elapsed_time_ms),
+            // A transfer that finishes within the timer's resolution has no
+            // meaningful speed; show a dash instead of NaN/Infinity.
             speed:
-              formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) +
-              "/s",
+              elapsed_time_ms > 0 && total_bytes > 0
+                ? formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) + "/s"
+                : "—",
           });
 
           // Stop background service on completion

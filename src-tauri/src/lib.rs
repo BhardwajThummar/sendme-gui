@@ -13,8 +13,6 @@ mod logger;
 mod sender_state;
 mod sendme;
 
-#[cfg(not(target_os = "android"))]
-use std::time::Instant;
 use std::{fs, path::Path, sync::Mutex};
 
 use config::config;
@@ -248,21 +246,12 @@ async fn receive_file_with_stats(
 
         // Handle the result
         match result {
-            Ok(path) => {
-                // Emit completion event with basic statistics
+            Ok(summary) => {
                 let _ = window.emit(
                     "download_completed",
-                    events::DownloadCompletedEvent {
-                        success: true,
-                        message: "Download completed successfully".to_string(),
-                        elapsed_time_ms: 0,
-                        download_path: file_storage_path,
-                        filename: "file".to_string(),
-                        total_bytes: 0,
-                        files_count: 1,
-                    },
+                    completed_event(&summary, file_storage_path),
                 );
-                Ok(path)
+                Ok("success".to_string())
             }
             Err(e) => {
                 // Emit error event if download failed
@@ -274,9 +263,6 @@ async fn receive_file_with_stats(
 
     #[cfg(not(target_os = "android"))]
     {
-        // Record start time for statistics
-        let start_time = Instant::now();
-
         // Emit event that download is starting
         let _ = window.emit("download_started", ());
 
@@ -297,29 +283,14 @@ async fn receive_file_with_stats(
                 )
                 .await;
 
-                // If download was successful, get file information and emit completion event
-                if result.is_ok() {
-                    let elapsed_ms = start_time.elapsed().as_millis() as u64;
-
-                    // Get information about the downloaded file(s)
-                    let file_info = get_downloaded_file_info(&file_storage_path);
-
-                    // Emit completion event with statistics
+                // Report what this transfer actually received
+                result.map(|summary| {
                     let _ = window_clone.emit(
                         "download_completed",
-                        events::DownloadCompletedEvent {
-                            success: true,
-                            message: "Download completed successfully".to_string(),
-                            elapsed_time_ms: elapsed_ms,
-                            download_path: file_storage_path,
-                            filename: file_info.filename,
-                            total_bytes: file_info.total_size,
-                            files_count: file_info.file_count,
-                        },
+                        completed_event(&summary, file_storage_path),
                     );
-                }
-
-                result
+                    "success".to_string()
+                })
             })
         })
         .await
@@ -332,66 +303,19 @@ async fn receive_file_with_stats(
     }
 }
 
-// Helper struct for file information
-struct DownloadedFileInfo {
-    filename: String,
-    total_size: u64,
-    file_count: u32,
-}
-
-// Function to get information about downloaded file(s)
-fn get_downloaded_file_info(path: &str) -> DownloadedFileInfo {
-    let path_obj = Path::new(path);
-    let mut total_size = 0;
-    let mut file_count = 0;
-    let mut filename = String::from("Downloaded File");
-
-    // Check if path exists
-    if path_obj.exists() {
-        if path_obj.is_file() {
-            // Single file download
-            if let Ok(metadata) = fs::metadata(path_obj) {
-                total_size = metadata.len();
-                file_count = 1;
-            }
-            if let Some(name) = path_obj.file_name() {
-                if let Some(name_str) = name.to_str() {
-                    filename = name_str.to_string();
-                }
-            }
-        } else if path_obj.is_dir() {
-            // Directory with multiple files
-            if let Ok(entries) = fs::read_dir(path_obj) {
-                // Process each file in the directory
-                let mut entries_vec = Vec::new();
-                for entry in entries.flatten() {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_file() {
-                            total_size += metadata.len();
-                            file_count += 1;
-                        }
-                    }
-                    entries_vec.push(entry);
-                }
-
-                // Try to get main directory name or first file name
-                if let Some(name) = path_obj.file_name() {
-                    if let Some(name_str) = name.to_str() {
-                        filename = name_str.to_string();
-                    }
-                } else if !entries_vec.is_empty() {
-                    if let Some(name) = entries_vec[0].file_name().to_str() {
-                        filename = name.to_string();
-                    }
-                }
-            }
-        }
-    }
-
-    DownloadedFileInfo {
-        filename,
-        total_size,
-        file_count,
+// Builds the completion event from what the transfer actually received
+fn completed_event(
+    summary: &sendme::ReceiveSummary,
+    download_path: String,
+) -> events::DownloadCompletedEvent {
+    events::DownloadCompletedEvent {
+        success: true,
+        message: "Download completed successfully".to_string(),
+        elapsed_time_ms: summary.download_ms,
+        download_path,
+        filename: summary.name.clone(),
+        total_bytes: summary.bytes,
+        files_count: summary.files,
     }
 }
 
