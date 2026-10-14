@@ -5492,6 +5492,7 @@ dependencies = [
  "tauri-plugin-barcode-scanner",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tauri-plugin-ios-folder",
  "tauri-plugin-shell",
  "tauri-plugin-store",
  "tokio",
@@ -6469,6 +6470,16 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-ios-folder"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

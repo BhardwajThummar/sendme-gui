@@ -9,9 +9,13 @@
 export function formatPathForDisplay(path: string): string {
     if (!path) return '';
 
-    // A folder picked on Android is stored as "saf:" + JSON with a content URI
+    // A folder picked on Android is stored as "saf:" + JSON with a content URI,
+    // one picked on iOS as "ios:" + JSON with its display name and a bookmark
     if (path.startsWith('saf:')) {
         return safLocationLabel(path);
+    }
+    if (path.startsWith('ios:')) {
+        return iosLocationLabel(path);
     }
 
     try {
@@ -59,6 +63,20 @@ export function safLocationLabel(path: string): string {
         const tree = decodeURIComponent((uri.split('/tree/')[1] ?? uri).split('/')[0]);
         // "primary:Documents/in" or "1A2B-3C4D:Pictures" -> drop the volume prefix
         return tree.includes(':') ? tree.slice(tree.indexOf(':') + 1) || 'Internal storage' : tree;
+    } catch {
+        return 'Selected folder';
+    }
+}
+
+/** True for a save location the user picked with a system folder picker. */
+export function isPickedLocation(path: string): boolean {
+    return path.startsWith('saf:') || path.startsWith('ios:');
+}
+
+/** Display name of an iOS picked-folder location. */
+export function iosLocationLabel(path: string): string {
+    try {
+        return JSON.parse(path.slice('ios:'.length)).name || 'Selected folder';
     } catch {
         return 'Selected folder';
     }

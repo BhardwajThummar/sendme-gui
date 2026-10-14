@@ -26,7 +26,8 @@ import { fileUrlToPath, getDownloadsFolderPath, getSavedDownloadPath, saveDownlo
 import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, pickAndroidSaveDir } from "@/utils/androidPicker";
 import { isIOS } from "@/utils/platform";
-import { formatPathForDisplay } from "@/utils/pathFormatter";
+import { pickIosSaveDir } from "@/utils/iosPicker";
+import { formatPathForDisplay, isPickedLocation } from "@/utils/pathFormatter";
 import QrScanner from "@/components/QrScanner";
 
 // Define types for download events
@@ -338,6 +339,17 @@ const FileReceive: React.FC = () => {
         return;
       }
 
+      if (isIOS()) {
+        // System folder picker; the result is kept as a bookmark to the folder
+        const dir = await pickIosSaveDir();
+        if (dir) {
+          setDownloadPath(dir.path);
+          await saveDownloadPath(dir.path);
+          logger.info("FileReceive", `Save location updated to: ${dir.name}`);
+        }
+        return;
+      }
+
       const result = await open({
         directory: true,
         multiple: false,
@@ -540,7 +552,7 @@ const FileReceive: React.FC = () => {
                 Your file has been saved to:
               </p>
               <div className="bg-muted p-2 rounded-md text-xs font-mono break-all border border-border">
-                {downloadPath.startsWith("saf:") ? formatPathForDisplay(downloadPath) : downloadPath}
+                {isPickedLocation(downloadPath) ? formatPathForDisplay(downloadPath) : downloadPath}
               </div>
             </div>
           </div>
@@ -617,25 +629,23 @@ const FileReceive: React.FC = () => {
             <div className="flex items-center gap-2">
               <Input
                 type="text"
-                value={downloadPath.startsWith("saf:") ? formatPathForDisplay(downloadPath) : downloadPath}
+                value={isPickedLocation(downloadPath) ? formatPathForDisplay(downloadPath) : downloadPath}
                 onChange={(e) => setDownloadPath(e.target.value)}
-                readOnly={downloadPath.startsWith("saf:")}
+                readOnly={isPickedLocation(downloadPath)}
                 placeholder="Download location"
                 disabled={status === "processing"}
                 className="flex-1 border-border text-xs h-9"
               />
-              {!isIOS() && (
-                <Button
-                  variant="outline"
-                  onClick={handleBrowse}
-                  disabled={status === "processing"}
-                  className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
-                  size="icon"
-                  title="Browse for folder"
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={handleBrowse}
+                disabled={status === "processing"}
+                className="flex items-center justify-center border-border hover:bg-muted hover:text-primary h-9 w-9 p-0"
+                size="icon"
+                title="Browse for folder"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
             </div>
             {downloadPath && (
               <p className="text-xs text-muted-foreground">
