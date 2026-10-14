@@ -1912,7 +1912,7 @@ pub async fn receive_file_with_progress(
     file_storage_path: String,
     verbose: bool,
     window: tauri::Window,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<ReceiveSummary> {
     debug!("Receiving file from ticket: {}", ticket);
 
     let blobs = match get_blob(ticket).await {
@@ -1926,6 +1926,7 @@ pub async fn receive_file_with_progress(
     info!("Retrieved {} blob(s) to download", blobs.len());
 
     // Download all blobs one by one
+    let mut parts = Vec::new();
     for (idx, blob_str) in blobs.iter().enumerate() {
         info!("Downloading blob {}/{}", idx + 1, blobs.len());
         let _ = window.emit(
@@ -1934,11 +1935,54 @@ pub async fn receive_file_with_progress(
         );
 
         // Download this blob
-        receive_single_blob(blob_str, &file_storage_path, verbose, window.clone()).await?;
+        parts.push(
+            receive_single_blob(blob_str, &file_storage_path, verbose, window.clone()).await?,
+        );
     }
 
     info!("Successfully downloaded all {} file(s)", blobs.len());
-    Ok("success".to_string())
+    Ok(ReceiveSummary::combine(parts))
+}
+
+/// What a finished receive tells the UI.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReceiveSummary {
+    /// The file or folder that was received (or "N items" for several).
+    pub name: String,
+    pub files: u32,
+    pub bytes: u64,
+    /// Time spent transferring, not counting waits such as the clash prompt.
+    pub download_ms: u64,
+}
+
+impl ReceiveSummary {
+    /// Merges the summaries of several tickets received in one go.
+    fn combine(parts: Vec<ReceiveSummary>) -> ReceiveSummary {
+        match parts.len() {
+            0 => ReceiveSummary::default(),
+            1 => parts.into_iter().next().unwrap_or_default(),
+            n => ReceiveSummary {
+                name: format!("{n} items"),
+                files: parts.iter().map(|p| p.files).sum(),
+                bytes: parts.iter().map(|p| p.bytes).sum(),
+                download_ms: parts.iter().map(|p| p.download_ms).sum(),
+            },
+        }
+    }
+}
+
+/// Display name for a received collection: the file or folder name if there
+/// is exactly one top-level entry, otherwise "N items".
+fn summary_name<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    let tops: std::collections::BTreeSet<&str> = names
+        .filter_map(|n| n.split('/').next())
+        .filter(|n| !n.is_empty())
+        .collect();
+    match tops.len() {
+        0 => String::new(),
+        1 => tops.into_iter().next().unwrap_or_default().to_string(),
+        n => format!("{n} items"),
+    }
 }
 
 async fn receive_single_blob(
@@ -1946,7 +1990,7 @@ async fn receive_single_blob(
     file_storage_path: &str,
     verbose: bool,
     window: tauri::Window,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ReceiveSummary> {
     let ticket = BlobTicket::from_str(blob_str)?;
     let addr = ticket.node_addr().clone();
 
@@ -2084,6 +2128,7 @@ async fn receive_single_blob(
         .map_err(|e| show_get_error(anyhow::anyhow!(e)))?;
 
     let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
+    let received_name = summary_name(collection.iter().map(|(name, _)| name.as_str()));
 
     if let Some((name, _)) = collection.iter().next() {
         if let Some(first) = name.split('/').next() {
@@ -2105,7 +2150,12 @@ async fn receive_single_blob(
         HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64),
     );
 
-    Ok(())
+    Ok(ReceiveSummary {
+        name: received_name,
+        files: total_files as u32,
+        bytes: payload_size,
+        download_ms: stats.elapsed.as_millis() as u64,
+    })
 }
 
 #[cfg(test)]
@@ -2146,6 +2196,45 @@ mod export_name_tests {
         assert_eq!(
             numbered_path(Path::new("/d/a.tar.gz"), 1),
             Path::new("/d/a.tar (1).gz")
+        );
+    }
+}
+
+#[cfg(test)]
+mod receive_summary_tests {
+    use super::{summary_name, ReceiveSummary};
+
+    #[test]
+    fn names_a_single_file_or_folder() {
+        assert_eq!(summary_name(["report.pdf"].into_iter()), "report.pdf");
+        assert_eq!(
+            summary_name(["gemini/ai.py", "gemini/sub/x.txt"].into_iter()),
+            "gemini"
+        );
+    }
+
+    #[test]
+    fn counts_several_top_level_items() {
+        assert_eq!(
+            summary_name(["a.txt", "b.txt", "dir/c"].into_iter()),
+            "3 items"
+        );
+        assert_eq!(summary_name(std::iter::empty()), "");
+    }
+
+    #[test]
+    fn combines_tickets() {
+        let one = ReceiveSummary {
+            name: "a".into(),
+            files: 2,
+            bytes: 10,
+            download_ms: 5,
+        };
+        assert_eq!(ReceiveSummary::combine(vec![one.clone()]), one);
+        let two = ReceiveSummary::combine(vec![one.clone(), one]);
+        assert_eq!(
+            (two.name.as_str(), two.files, two.bytes, two.download_ms),
+            ("2 items", 4, 20, 10)
         );
     }
 }
