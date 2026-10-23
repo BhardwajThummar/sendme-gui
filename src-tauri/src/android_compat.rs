@@ -279,7 +279,14 @@ pub mod android {
         debug!("Android: Storage path: {}", file_storage_path);
 
         // Use the desktop's progress-aware receive function
-        match receive_file_with_progress(ticket, file_storage_path, verbose, window).await {
+        match receive_file_with_progress(
+            ticket,
+            file_storage_path,
+            verbose,
+            crate::sendme::Events::new(window),
+        )
+        .await
+        {
             Ok(summary) => {
                 info!("Android: File received successfully");
                 Ok(summary)

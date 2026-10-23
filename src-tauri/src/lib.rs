@@ -273,7 +273,7 @@ async fn receive_file_with_stats(
                     ticket,
                     file_storage_path.clone(),
                     verbose,
-                    window_for_progress,
+                    sendme::Events::new(window_for_progress),
                 )
                 .await;
 
