@@ -17,52 +17,73 @@ pub mod android {
     lazy_static! {
         static ref ANDROID_ROUTER: Mutex<Option<iroh::protocol::Router>> = Mutex::new(None);
         static ref ANDROID_BLOBS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-        static ref BACKGROUND_SERVICE_ACTIVE: std::sync::atomic::AtomicBool =
-            std::sync::atomic::AtomicBool::new(false);
     }
 
-    /// Start the Android foreground service to keep the app running in background
-    pub fn start_background_service(window: &tauri::Window) -> Result<(), String> {
-        use std::sync::atomic::Ordering;
-        use tauri::Emitter;
+    /// The foreground service (see TransferService.kt) runs while the app is sharing
+    /// or receiving, so transfers keep full speed in the background / screen off.
+    static SHARING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static RECEIVING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static SERVICE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-        if BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst) {
-            debug!("Android: Background service already running");
-            return Ok(());
-        }
-
-        info!("Android: Starting foreground service for background execution");
-
-        // Emit an event that the frontend will listen to and start the service
-        let _ = window.emit("start-background-service", ());
-
-        BACKGROUND_SERVICE_ACTIVE.store(true, Ordering::SeqCst);
-        Ok(())
+    pub fn set_sharing(window: &tauri::Window, on: bool) {
+        SHARING.store(on, std::sync::atomic::Ordering::SeqCst);
+        sync_service(window);
     }
 
-    /// Stop the Android foreground service
-    pub fn stop_background_service(window: &tauri::Window) -> Result<(), String> {
-        use std::sync::atomic::Ordering;
-        use tauri::Emitter;
-
-        if !BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst) {
-            debug!("Android: Background service not running");
-            return Ok(());
-        }
-
-        info!("Android: Stopping foreground service");
-
-        // Emit an event that the frontend will listen to and stop the service
-        let _ = window.emit("stop-background-service", ());
-
-        BACKGROUND_SERVICE_ACTIVE.store(false, Ordering::SeqCst);
-        Ok(())
+    pub fn receiving_started(window: &tauri::Window) {
+        RECEIVING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        sync_service(window);
     }
 
-    /// Check if background service is active
+    pub fn receiving_finished(window: &tauri::Window) {
+        let _ = RECEIVING.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |n| Some(n.saturating_sub(1)),
+        );
+        sync_service(window);
+    }
+
     pub fn is_background_service_active() -> bool {
+        SERVICE_ON.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Starts or stops the service when "sharing or receiving" changes.
+    fn sync_service(window: &tauri::Window) {
         use std::sync::atomic::Ordering;
-        BACKGROUND_SERVICE_ACTIVE.load(Ordering::SeqCst)
+        let want = SHARING.load(Ordering::SeqCst) || RECEIVING.load(Ordering::SeqCst) > 0;
+        if SERVICE_ON.swap(want, Ordering::SeqCst) == want {
+            return;
+        }
+        info!(
+            "Android: {} the transfer service",
+            if want { "starting" } else { "stopping" }
+        );
+        call_activity(
+            window,
+            if want {
+                "startTransferService"
+            } else {
+                "stopTransferService"
+            },
+        );
+    }
+
+    /// Calls a no-argument method on MainActivity (on the UI thread).
+    fn call_activity(window: &tauri::Window, method: &'static str) {
+        use tauri::Manager;
+        let Some(webview_window) = window.get_webview_window(window.label()) else {
+            error!("Android: no webview to reach the activity for {}", method);
+            return;
+        };
+        let _ = webview_window.with_webview(move |platform| {
+            platform.jni_handle().exec(move |env, activity, _webview| {
+                if let Err(e) = env.call_method(activity, method, "()V", &[]) {
+                    error!("Android: {} failed: {}", method, e);
+                    let _ = env.exception_clear();
+                }
+            });
+        });
     }
 
     // Android-specific path helper
@@ -130,9 +151,6 @@ pub mod android {
         };
 
         info!("Android: Starting send_file_minimal for: {}", file_path);
-
-        // Start the foreground service to keep app alive during transfer
-        let _ = start_background_service(&window);
 
         let send_args = SendArgs {
             path: PathBuf::from(file_path.clone()),

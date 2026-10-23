@@ -57,6 +57,11 @@ struct CopyInArgs<'a> {
     overwrite: bool,
 }
 
+#[derive(Serialize)]
+struct TransferArgs {
+    on: bool,
+}
+
 pub struct IosFolder<R: Runtime>(PluginHandle<R>);
 
 impl<R: Runtime> IosFolder<R> {
@@ -79,6 +84,19 @@ impl<R: Runtime> IosFolder<R> {
             .await
             .map_err(|e| e.to_string())?;
         Ok(r.path)
+    }
+
+    /// Tells iOS a transfer is running: stops the screen from auto-locking and asks
+    /// for background time, so a transfer survives a brief trip out of the app.
+    /// (iOS still suspends background apps after a short while; there is no way to
+    /// keep a transfer going indefinitely there.)
+    pub async fn transfer_active(&self, on: bool) -> Result<(), String> {
+        let _: serde_json::Value = self
+            .0
+            .run_mobile_plugin_async("transferActive", TransferArgs { on })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     /// Which of the relative `paths` already exist inside the picked folder.

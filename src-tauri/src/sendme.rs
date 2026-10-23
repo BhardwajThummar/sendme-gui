@@ -2143,6 +2143,9 @@ async fn fetch_once(
         let mut total_done = 0u64;
         let mut sizes_map = BTreeMap::new();
         let mut last_update = Instant::now();
+        // Where this session started. A resumed download begins part-way, and what was
+        // already on disk must not count towards the speed or the time remaining.
+        let mut session_start: Option<(u64, Instant)> = None;
 
         loop {
             let x = recv.recv().await;
@@ -2164,8 +2167,11 @@ async fn fetch_once(
                     // Update every 100ms to avoid too many events
                     if last_update.elapsed().as_millis() > 100 {
                         let percentage = (current_bytes as f64 / total_size as f64) * 100.0;
-                        let speed = if elapsed.as_secs_f64() > 0.0 {
-                            (current_bytes as f64 / elapsed.as_secs_f64()) as u64
+                        let (start_bytes, started_at) =
+                            *session_start.get_or_insert((current_bytes, Instant::now()));
+                        let session_secs = started_at.elapsed().as_secs_f64();
+                        let speed = if session_secs > 0.0 {
+                            (current_bytes.saturating_sub(start_bytes) as f64 / session_secs) as u64
                         } else {
                             0
                         };

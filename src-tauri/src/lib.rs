@@ -85,8 +85,8 @@ async fn send_file_command(
     verbose: bool,
     _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
-    // Enable background mode before starting transfer (with window for Android service)
-    background_manager::enable_background_mode_with_window(&window);
+    // Keep the transfer running in the background (Android foreground service)
+    background_manager::sharing(&window, true);
 
     #[cfg(target_os = "android")]
     {
@@ -94,7 +94,7 @@ async fn send_file_command(
             android_compat::android::send_file_minimal(file_path, verbose, window.clone()).await;
         // Keep background mode enabled even after success to maintain the connection
         if result.is_err() {
-            background_manager::disable_background_mode_with_window(&window);
+            background_manager::sharing(&window, false);
         }
         result
     }
@@ -108,7 +108,7 @@ async fn send_file_command(
             }
             Err(_e) => {
                 // Disable background mode and stop sharing if it fails
-                background_manager::disable_background_mode_with_window(&window);
+                background_manager::sharing(&window, false);
                 let _e = sendme::stop_sharing(_state).await;
                 // Err(e.to_string())
                 // Emit error event if sending failed
@@ -125,8 +125,8 @@ async fn send_files_command(
     verbose: bool,
     _state: State<'_, SharedSenderState>,
 ) -> Result<String, String> {
-    // Enable background mode before starting transfer (with window for Android service)
-    background_manager::enable_background_mode_with_window(&window);
+    // Keep the transfer running in the background (Android foreground service)
+    background_manager::sharing(&window, true);
 
     #[cfg(target_os = "android")]
     {
@@ -134,7 +134,7 @@ async fn send_files_command(
             android_compat::android::send_files_minimal(file_paths, verbose, window.clone()).await;
         // Keep background mode enabled even after success to maintain the connection
         if result.is_err() {
-            background_manager::disable_background_mode_with_window(&window);
+            background_manager::sharing(&window, false);
         }
         result
     }
@@ -149,7 +149,7 @@ async fn send_files_command(
             }
             Err(_e) => {
                 // Disable background mode and stop sharing if it fails
-                background_manager::disable_background_mode_with_window(&window);
+                background_manager::sharing(&window, false);
                 let _e = sendme::stop_sharing(_state).await;
                 Err("Failed to send files".to_string())
             }
@@ -162,8 +162,7 @@ async fn stop_sharing_command(
     window: Window,
     _state: State<'_, SharedSenderState>,
 ) -> Result<(), String> {
-    // Disable background mode when stopping sharing (with window for Android service)
-    background_manager::disable_background_mode_with_window(&window);
+    background_manager::sharing(&window, false);
 
     #[cfg(target_os = "android")]
     {
@@ -187,14 +186,14 @@ async fn receive_file_command(
     file_storage_path: String,
     verbose: bool,
 ) -> Result<String, String> {
-    // Enable background mode before starting transfer (with window for Android service)
-    background_manager::enable_background_mode_with_window(&window);
+    // Keep the download running in the background (Android foreground service)
+    background_manager::receiving(&window, true);
 
     // Call our internal implementation that has the window parameter
     let result = receive_file_with_stats(window.clone(), ticket, file_storage_path, verbose).await;
 
-    // Disable background mode after transfer completes (success or failure)
-    background_manager::disable_background_mode_with_window(&window);
+    // Done, whether it worked or not
+    background_manager::receiving(&window, false);
 
     result
 }

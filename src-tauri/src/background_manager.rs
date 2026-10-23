@@ -5,14 +5,6 @@ use crate::logger::{debug, info, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-#[cfg(target_os = "android")]
-use lazy_static::lazy_static;
-
-#[cfg(target_os = "android")]
-lazy_static! {
-    static ref BACKGROUND_ENABLED: AtomicBool = AtomicBool::new(false);
-}
-
 /// Enable background execution mode
 /// This should be called when starting file transfers
 pub fn enable_background_mode() {
@@ -20,8 +12,7 @@ pub fn enable_background_mode() {
 
     #[cfg(target_os = "android")]
     {
-        BACKGROUND_ENABLED.store(true, Ordering::SeqCst);
-        debug!("Background mode enabled for Android - service started via android_compat");
+        debug!("Background mode enabled for Android");
     }
 
     #[cfg(target_os = "ios")]
@@ -36,22 +27,67 @@ pub fn enable_background_mode() {
     }
 }
 
-/// Enable background execution mode with window handle (Android-specific)
-pub fn enable_background_mode_with_window(window: &tauri::Window) {
-    info!("Enabling background execution mode with window");
+/// A share started or stopped. On Android the foreground service runs while
+/// sharing or receiving, so the transfer keeps full speed in the background.
+pub fn sharing(window: &tauri::Window, on: bool) {
+    info!("Sharing {}", if on { "started" } else { "stopped" });
 
     #[cfg(target_os = "android")]
-    {
-        use crate::android_compat;
-        BACKGROUND_ENABLED.store(true, Ordering::SeqCst);
-        let _ = android_compat::android::start_background_service(window);
+    crate::android_compat::android::set_sharing(window, on);
+
+    #[cfg(target_os = "ios")]
+    ios_transfer_active(window, on);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let _ = window;
+}
+
+/// A download started or finished (see `sharing`).
+pub fn receiving(window: &tauri::Window, on: bool) {
+    info!("Receiving {}", if on { "started" } else { "finished" });
+
+    #[cfg(target_os = "android")]
+    if on {
+        crate::android_compat::android::receiving_started(window);
+    } else {
+        crate::android_compat::android::receiving_finished(window);
     }
 
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = window; // Suppress unused warning
-        enable_background_mode();
+    #[cfg(target_os = "ios")]
+    ios_transfer_active(window, on);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let _ = window;
+}
+
+/// iOS: keep the screen on and hold background time while a transfer runs.
+/// (Sharing and receiving can overlap, so only the last one to stop releases it.)
+#[cfg(target_os = "ios")]
+fn ios_transfer_active(window: &tauri::Window, on: bool) {
+    use std::sync::atomic::AtomicUsize;
+    use tauri::Manager;
+    use tauri_plugin_ios_folder::IosFolderExt;
+    static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+    let now = if on {
+        ACTIVE.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        ACTIVE
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .map_or(0, |prev| prev.saturating_sub(1))
+    };
+    // Only the first start and the last stop change anything.
+    if (on && now != 1) || (!on && now != 0) {
+        return;
     }
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = app.ios_folder().transfer_active(on).await {
+            warn!("iOS transfer keep-awake failed: {}", e);
+        }
+    });
 }
 
 /// Disable background execution mode
@@ -61,8 +97,7 @@ pub fn disable_background_mode() {
 
     #[cfg(target_os = "android")]
     {
-        BACKGROUND_ENABLED.store(false, Ordering::SeqCst);
-        debug!("Background mode disabled for Android - service stopped via android_compat");
+        debug!("Background mode disabled for Android");
     }
 
     #[cfg(target_os = "ios")]
@@ -76,29 +111,11 @@ pub fn disable_background_mode() {
     }
 }
 
-/// Disable background execution mode with window handle (Android-specific)
-pub fn disable_background_mode_with_window(window: &tauri::Window) {
-    info!("Disabling background execution mode with window");
-
-    #[cfg(target_os = "android")]
-    {
-        use crate::android_compat;
-        BACKGROUND_ENABLED.store(false, Ordering::SeqCst);
-        let _ = android_compat::android::stop_background_service(window);
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = window; // Suppress unused warning
-        disable_background_mode();
-    }
-}
-
 /// Check if background mode is currently enabled
 pub fn is_background_mode_enabled() -> bool {
     #[cfg(target_os = "android")]
     {
-        BACKGROUND_ENABLED.load(Ordering::SeqCst)
+        crate::android_compat::android::is_background_service_active()
     }
 
     #[cfg(not(target_os = "android"))]
