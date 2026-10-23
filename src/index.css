@@ -91,12 +91,16 @@
     border-color: var(--border);
     outline-color: var(--ring);
   }
-  html,
-  body {
-    overflow-x: hidden;
-  }
   body {
     background-color: var(--background);
     color: var(--foreground);
   }
+}
+
+/* iOS zooms the page when an input under 16px gets focus, which then pans
+   sideways. Unlayered, so it wins over the text-sm utility. */
+input,
+textarea,
+select {
+  font-size: 16px;
 }
