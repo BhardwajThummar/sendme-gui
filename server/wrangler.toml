@@ -5,3 +5,14 @@ compatibility_date = "2026-10-01"
 # The KV namespace is created automatically on first `wrangler deploy`.
 [[kv_namespaces]]
 binding = "CODES"
+
+# Per-IP rate limits. Lookups are limited hardest: guessing a code takes many of them.
+[[ratelimits]]
+name = "LOOKUP_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "CREATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 10, period = 60 }

@@ -1,3 +1,6 @@
 xcuserdata/
 build/
 Externals/
+
+# Generated from project.yml on every build, and it embeds your Apple Team ID
+*.xcodeproj/project.pbxproj

@@ -29,7 +29,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SendMe needs local network access to transfer files directly between devices.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>SendMe needs camera access to scan a sender's QR code.</string>
+	<string>SendMe uses the camera to scan a sender&apos;s QR code.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
