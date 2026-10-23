@@ -1,7 +1,6 @@
 //! Command line arguments.
 
 use std::{
-    collections::BTreeMap,
     fmt::{Display, Formatter},
     net::{SocketAddrV4, SocketAddrV6},
     path::{Component, Path, PathBuf},
@@ -12,31 +11,32 @@ use std::{
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use console::style;
 use data_encoding::HEXLOWER;
 use futures_buffered::BufferedStreamExt;
-use indicatif::{
-    HumanBytes, HumanDuration, MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle,
-};
+use indicatif::{HumanBytes, HumanDuration};
 use iroh::{
-    discovery::{dns::DnsDiscovery, pkarr::PkarrPublisher},
-    Endpoint, NodeAddr, RelayMap, RelayMode, RelayUrl, SecretKey,
+    address_lookup::{dns::DnsAddressLookup, pkarr::PkarrPublisher},
+    endpoint::presets,
+    Endpoint, EndpointAddr, RelayMap, RelayMode, RelayUrl, SecretKey, TransportAddr,
 };
 use iroh_blobs::{
-    format::collection::Collection,
-    get::{
-        db::DownloadProgress,
-        fsm::{AtBlobHeaderNextError, DecodeError},
-        request::get_hash_seq_and_sizes,
+    api::{
+        blobs::{AddPathOptions, AddProgressItem, ExportMode, ExportOptions, ImportMode},
+        remote::GetProgressItem,
+        Store, TempTag,
     },
-    net_protocol::Blobs,
-    provider::{self, CustomEventSender},
-    store::{ExportMode, ImportMode, ImportProgress},
+    format::collection::Collection,
+    get::{request::get_hash_seq_and_sizes, GetError, Stats},
+    provider::{
+        self,
+        events::{ConnectMode, EventMask, EventSender, ProviderMessage, RequestUpdate},
+    },
+    store::fs::FsStore,
     ticket::BlobTicket,
-    BlobFormat, Hash, HashAndFormat, TempTag,
+    BlobFormat, BlobsProtocol, Hash,
 };
-use n0_future::{future::Boxed, StreamExt};
-use rand::Rng;
+use n0_future::{FuturesUnordered, StreamExt};
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use walkdir::WalkDir;
@@ -236,16 +236,16 @@ async fn resolve_relay_mode(option: RelayModeOption) -> RelayMode {
     }
 
     let probes = iroh::defaults::prod::default_relay_map()
-        .nodes()
-        .cloned()
-        .map(|node| async move {
-            let host = node
+        .relays::<Vec<_>>()
+        .into_iter()
+        .map(|relay| async move {
+            let host = relay
                 .url
                 .host_str()
                 .unwrap_or_default()
                 .trim_end_matches('.')
                 .to_string();
-            let port = node.url.port_or_known_default().unwrap_or(443);
+            let port = relay.url.port_or_known_default().unwrap_or(443);
             let ok = tokio::time::timeout(
                 std::time::Duration::from_secs(3),
                 tokio::net::TcpStream::connect((host.as_str(), port)),
@@ -253,26 +253,23 @@ async fn resolve_relay_mode(option: RelayModeOption) -> RelayMode {
             .await
             .map(|r| r.is_ok())
             .unwrap_or(false);
-            (node, ok)
+            (relay, ok)
         })
         .collect::<Vec<_>>();
 
     let reachable: Vec<_> = futures::future::join_all(probes)
         .await
         .into_iter()
-        .filter_map(|(node, ok)| ok.then_some(node))
+        .filter_map(|(relay, ok)| ok.then_some(relay))
         .collect();
 
-    match RelayMap::from_nodes(reachable) {
-        Ok(map) if !map.is_empty() => {
-            info!("Using {} reachable relay(s)", map.len());
-            RelayMode::Custom(map)
-        }
-        _ => {
-            warn!("No relay passed the reachability probe; using the default relay map");
-            RelayMode::Default
-        }
+    if reachable.is_empty() {
+        warn!("No relay passed the reachability probe; using the default relay map");
+        return RelayMode::Default;
     }
+    let map: RelayMap = reachable.into_iter().collect();
+    info!("Using {} reachable relay(s)", map.len());
+    RelayMode::Custom(map)
 }
 
 impl From<RelayModeOption> for RelayMode {
@@ -280,7 +277,7 @@ impl From<RelayModeOption> for RelayMode {
         match value {
             RelayModeOption::Disabled => RelayMode::Disabled,
             RelayModeOption::Default => RelayMode::Default,
-            RelayModeOption::Custom(url) => RelayMode::Custom(RelayMap::from_url(url)),
+            RelayModeOption::Custom(url) => RelayMode::Custom(url.into()),
         }
     }
 }
@@ -349,20 +346,29 @@ pub enum AddrInfoOptions {
     Addresses,
 }
 
-fn apply_options(addr: &mut NodeAddr, opts: AddrInfoOptions) {
+fn apply_options(addr: &mut EndpointAddr, opts: AddrInfoOptions) {
     match opts {
         AddrInfoOptions::Id => {
-            addr.direct_addresses.clear();
-            addr.relay_url = None;
+            addr.addrs = Default::default();
         }
         AddrInfoOptions::RelayAndAddresses => {
             // nothing to do
         }
         AddrInfoOptions::Relay => {
-            addr.direct_addresses.clear();
+            addr.addrs = addr
+                .addrs
+                .iter()
+                .filter(|addr| matches!(addr, TransportAddr::Relay(_)))
+                .cloned()
+                .collect();
         }
         AddrInfoOptions::Addresses => {
-            addr.relay_url = None;
+            addr.addrs = addr
+                .addrs
+                .iter()
+                .filter(|addr| matches!(addr, TransportAddr::Ip(_)))
+                .cloned()
+                .collect();
         }
     }
 }
@@ -374,9 +380,9 @@ fn get_or_create_secret(print: bool) -> anyhow::Result<SecretKey> {
     match std::env::var("IROH_SECRET") {
         Ok(secret) => SecretKey::from_str(&secret).context("invalid secret"),
         Err(_) => {
-            let key = SecretKey::generate(rand::rngs::OsRng);
+            let key = SecretKey::generate();
             if print {
-                info!("Using secret key: {}", key);
+                info!("Generated a new secret key");
             }
             Ok(key)
         }
@@ -436,166 +442,7 @@ pub fn canonicalized_path_to_string(
     Ok(path_str)
 }
 
-pub async fn show_ingest_progress(
-    recv: async_channel::Receiver<ImportProgress>,
-) -> anyhow::Result<()> {
-    let mp = MultiProgress::new();
-    mp.set_draw_target(ProgressDrawTarget::stderr());
-    let op = mp.add(ProgressBar::hidden());
-    op.set_style(
-        ProgressStyle::default_spinner().template("{spinner:.green} [{elapsed_precise}] {msg}")?,
-    );
-    // op.set_message(format!("{} Ingesting ...\n", style("[1/2]").bold().dim()));
-    // op.set_length(total_files);
-    let mut names = BTreeMap::new();
-    let mut sizes = BTreeMap::new();
-    let mut pbs = BTreeMap::new();
-    loop {
-        let event = recv.recv().await;
-        match event {
-            Ok(ImportProgress::Found { id, name }) => {
-                names.insert(id, name);
-            }
-            Ok(ImportProgress::Size { id, size }) => {
-                sizes.insert(id, size);
-                let total_size = sizes.values().sum::<u64>();
-                op.set_message(format!(
-                    "{} Ingesting {} files, {}\n",
-                    style("[1/2]").bold().dim(),
-                    sizes.len(),
-                    HumanBytes(total_size)
-                ));
-                let name = names.get(&id).cloned().unwrap_or_default();
-                let pb = mp.add(ProgressBar::hidden());
-                pb.set_style(ProgressStyle::with_template(
-                    "{msg}{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes}",
-                )?.progress_chars("#>-"));
-                pb.set_message(format!("{} {}", style("[2/2]").bold().dim(), name));
-                pb.set_length(size);
-                pbs.insert(id, pb);
-            }
-            Ok(ImportProgress::OutboardProgress { id, offset }) => {
-                if let Some(pb) = pbs.get(&id) {
-                    pb.set_position(offset);
-                }
-            }
-            Ok(ImportProgress::OutboardDone { id, .. }) => {
-                // you are not guaranteed to get any OutboardProgress
-                if let Some(pb) = pbs.remove(&id) {
-                    pb.finish_and_clear();
-                }
-            }
-            Ok(ImportProgress::CopyProgress { .. }) => {
-                // we are not copying anything
-            }
-            Err(e) => {
-                op.set_message(format!("Error receiving progress: {e}"));
-                break;
-            }
-        }
-    }
-    op.finish_and_clear();
-    Ok(())
-}
-
-/// Show ingest progress with Tauri window events
-pub async fn show_ingest_progress_with_window(
-    recv: async_channel::Receiver<ImportProgress>,
-    window: Option<tauri::Window>,
-    total_files: usize,
-) -> anyhow::Result<()> {
-    let mp = MultiProgress::new();
-    mp.set_draw_target(ProgressDrawTarget::stderr());
-    let op = mp.add(ProgressBar::hidden());
-    op.set_style(
-        ProgressStyle::default_spinner().template("{spinner:.green} [{elapsed_precise}] {msg}")?,
-    );
-
-    let mut names = BTreeMap::new();
-    let mut sizes = BTreeMap::new();
-    let mut pbs = BTreeMap::new();
-    let mut files_processed = 0;
-
-    loop {
-        let event = recv.recv().await;
-        match event {
-            Ok(ImportProgress::Found { id, name }) => {
-                names.insert(id, name.clone());
-
-                // Emit event to window
-                if let Some(ref win) = window {
-                    let _ = win.emit(
-                        "import_progress",
-                        crate::events::ImportProgressEvent {
-                            percentage: (files_processed as f64 / total_files as f64 * 100.0)
-                                .min(100.0),
-                            current_file: name,
-                            files_processed,
-                            total_files,
-                        },
-                    );
-                }
-            }
-            Ok(ImportProgress::Size { id, size }) => {
-                sizes.insert(id, size);
-                let total_size = sizes.values().sum::<u64>();
-                op.set_message(format!(
-                    "{} Ingesting {} files, {}\n",
-                    style("[1/2]").bold().dim(),
-                    sizes.len(),
-                    HumanBytes(total_size)
-                ));
-                let name = names.get(&id).cloned().unwrap_or_default();
-                let pb = mp.add(ProgressBar::hidden());
-                pb.set_style(ProgressStyle::with_template(
-                    "{msg}{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes}",
-                )?.progress_chars("#>-"));
-                pb.set_message(format!("{} {}", style("[2/2]").bold().dim(), name));
-                pb.set_length(size);
-                pbs.insert(id, pb);
-            }
-            Ok(ImportProgress::OutboardProgress { id, offset }) => {
-                if let Some(pb) = pbs.get(&id) {
-                    pb.set_position(offset);
-                }
-            }
-            Ok(ImportProgress::OutboardDone { id, .. }) => {
-                // you are not guaranteed to get any OutboardProgress
-                if let Some(pb) = pbs.remove(&id) {
-                    pb.finish_and_clear();
-                }
-
-                files_processed += 1;
-
-                // Emit updated progress
-                if let Some(ref win) = window {
-                    let current_name = names.get(&id).cloned().unwrap_or_default();
-                    let _ = win.emit(
-                        "import_progress",
-                        crate::events::ImportProgressEvent {
-                            percentage: (files_processed as f64 / total_files as f64 * 100.0)
-                                .min(100.0),
-                            current_file: current_name,
-                            files_processed,
-                            total_files,
-                        },
-                    );
-                }
-            }
-            Ok(ImportProgress::CopyProgress { .. }) => {
-                // we are not copying anything
-            }
-            Err(e) => {
-                op.set_message(format!("Error receiving progress: {e}"));
-                break;
-            }
-        }
-    }
-    op.finish_and_clear();
-    Ok(())
-}
-
-/// Import from a file or directory into the database.
+/// Import from a file or directory into the store.
 ///
 /// The returned tag always refers to a collection. If the input is a file, this
 /// is a collection with a single blob, named like the file.
@@ -603,19 +450,18 @@ pub async fn show_ingest_progress_with_window(
 /// If the input is a directory, the collection contains all the files in the
 /// directory.
 #[allow(dead_code)]
-async fn import(
-    path: PathBuf,
-    db: impl iroh_blobs::store::Store,
-) -> anyhow::Result<(TempTag, u64, Collection)> {
+async fn import(path: PathBuf, db: &Store) -> anyhow::Result<(TempTag, u64, Collection)> {
     import_with_window(path, db, None).await
 }
 
 /// Import with optional window for emitting progress events
 async fn import_with_window(
     path: PathBuf,
-    db: impl iroh_blobs::store::Store,
+    db: &Store,
     window: Option<tauri::Window>,
 ) -> anyhow::Result<(TempTag, u64, Collection)> {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
     let path = path.canonicalize()?;
     anyhow::ensure!(path.exists(), "path {} does not exist", path.display());
     let root = path.parent().context("context get parent")?;
@@ -638,27 +484,56 @@ async fn import_with_window(
         .filter_map(Result::transpose)
         .collect::<anyhow::Result<Vec<_>>>()?;
     let total_files = data_sources.len();
-    let (send, recv) = async_channel::bounded(32);
-    let progress = iroh_blobs::util::progress::AsyncChannelProgressSender::new(send);
+    // Known up front so progress can follow bytes hashed, which matters for one huge file.
+    let total_bytes: u64 = data_sources
+        .iter()
+        .filter_map(|(_, p)| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    let bytes_done = Arc::new(AtomicU64::new(0));
+    let files_done = Arc::new(AtomicUsize::new(0));
+    let last_percent = Arc::new(AtomicU64::new(u64::MAX));
 
-    // Clone window for progress task if available
-    let window_clone = window.clone();
-    let show_progress = if window_clone.is_some() {
-        tokio::spawn(show_ingest_progress_with_window(
-            recv,
-            window_clone,
-            total_files,
-        ))
-    } else {
-        tokio::spawn(show_ingest_progress(recv))
+    let emit = {
+        let window = window.clone();
+        let bytes_done = bytes_done.clone();
+        let files_done = files_done.clone();
+        let last_percent = last_percent.clone();
+        move |current_file: &str, force: bool| {
+            let Some(win) = &window else { return };
+            let percentage = if total_bytes > 0 {
+                bytes_done.load(Ordering::Relaxed) as f64 / total_bytes as f64 * 100.0
+            } else {
+                files_done.load(Ordering::Relaxed) as f64 / total_files.max(1) as f64 * 100.0
+            }
+            .min(100.0);
+            // only when the whole percent changes, to keep the event stream light
+            if !force
+                && last_percent.swap(percentage as u64, Ordering::Relaxed) == percentage as u64
+            {
+                return;
+            }
+            let _ = win.emit(
+                "import_progress",
+                crate::events::ImportProgressEvent {
+                    percentage,
+                    current_file: current_file.to_string(),
+                    files_processed: files_done.load(Ordering::Relaxed),
+                    total_files,
+                },
+            );
+        }
     };
 
     // import all the files, using num_cpus workers, return names and temp tags
-    let mut names_and_tags = futures_lite::stream::iter(data_sources)
+    let mut names_and_tags = n0_future::stream::iter(data_sources)
         .map(|(name, path)| {
             let db = db.clone();
-            let progress = progress.clone();
+            let emit = emit.clone();
+            let bytes_done = bytes_done.clone();
+            let files_done = files_done.clone();
             async move {
+                emit(&name, true);
                 // iOS hands out a temporary copy of the picked file that the
                 // system deletes soon after, so referencing it in place would
                 // leave nothing to serve; copy into the store there instead.
@@ -666,10 +541,38 @@ async fn import_with_window(
                 let mode = ImportMode::Copy;
                 #[cfg(not(target_os = "ios"))]
                 let mode = ImportMode::TryReference;
-                let (temp_tag, file_size) = db
-                    .import_file(path, mode, BlobFormat::Raw, progress)
-                    .await?;
-                anyhow::Ok((name, temp_tag, file_size))
+                let import = db.add_path_with_opts(AddPathOptions {
+                    path,
+                    mode,
+                    format: BlobFormat::Raw,
+                });
+                let mut stream = import.stream().await;
+                let mut item_size = 0;
+                let mut hashed = 0u64;
+                let temp_tag = loop {
+                    let item = stream
+                        .next()
+                        .await
+                        .context("import stream ended without a tag")?;
+                    match item {
+                        AddProgressItem::Size(size) => item_size = size,
+                        AddProgressItem::OutboardProgress(offset) => {
+                            bytes_done.fetch_add(offset.saturating_sub(hashed), Ordering::Relaxed);
+                            hashed = offset;
+                            emit(&name, false);
+                        }
+                        AddProgressItem::CopyProgress(_) | AddProgressItem::CopyDone => {}
+                        AddProgressItem::Error(cause) => {
+                            anyhow::bail!("error importing {}: {}", name, cause);
+                        }
+                        AddProgressItem::Done(tt) => break tt,
+                    }
+                };
+                // the hashing progress may not report the very end
+                bytes_done.fetch_add(item_size.saturating_sub(hashed), Ordering::Relaxed);
+                files_done.fetch_add(1, Ordering::Relaxed);
+                emit(&name, true);
+                anyhow::Ok((name, temp_tag, item_size))
             }
         })
         .buffered_unordered(num_cpus::get())
@@ -677,7 +580,6 @@ async fn import_with_window(
         .await
         .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
-    drop(progress);
     names_and_tags.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
     // total size of all files
     let size = names_and_tags.iter().map(|(_, _, size)| *size).sum::<u64>();
@@ -685,13 +587,12 @@ async fn import_with_window(
     // we must also keep the tags around so the data does not get gced.
     let (collection, tags) = names_and_tags
         .into_iter()
-        .map(|(name, tag, _)| ((name, *tag.hash()), tag))
+        .map(|(name, tag, _)| ((name, tag.hash()), tag))
         .unzip::<_, _, Collection, Vec<_>>();
-    let temp_tag = collection.clone().store(&db).await?;
+    let temp_tag = collection.clone().store(db).await?;
     // now that the collection is stored, we can drop the tags
     // data is protected by the collection
     drop(tags);
-    show_progress.await??;
     Ok((temp_tag, size, collection))
 }
 
@@ -769,7 +670,7 @@ fn numbered_path(target: &Path, n: u32) -> PathBuf {
 }
 
 async fn export(
-    db: impl iroh_blobs::store::Store,
+    db: &Store,
     collection: Collection,
     storage_file_path: String,
     window: Option<&tauri::Window>,
@@ -797,7 +698,7 @@ async fn export(
 /// clashes once.
 #[cfg(target_os = "ios")]
 async fn export_to_ios_folder(
-    db: impl iroh_blobs::store::Store,
+    db: &Store,
     collection: Collection,
     location_json: &str,
     window: &tauri::Window,
@@ -816,7 +717,7 @@ async fn export_to_ios_folder(
 
     let staging = CWD
         .join("ios-staging")
-        .join(HEXLOWER.encode(&rand::thread_rng().gen::<[u8; 8]>()));
+        .join(HEXLOWER.encode(&rand::rng().random::<[u8; 8]>()));
     export_to_path(db, collection, staging.clone(), None).await?;
 
     let result = async {
@@ -868,7 +769,7 @@ async fn export_to_ios_folder(
 /// files into the folder the user picked, asking about clashes once.
 #[cfg(target_os = "android")]
 async fn export_to_saf(
-    db: impl iroh_blobs::store::Store,
+    db: &Store,
     collection: Collection,
     tree_json: &str,
     window: &tauri::Window,
@@ -881,7 +782,7 @@ async fn export_to_saf(
 
     let staging = CWD
         .join("saf-staging")
-        .join(HEXLOWER.encode(&rand::thread_rng().gen::<[u8; 8]>()));
+        .join(HEXLOWER.encode(&rand::rng().random::<[u8; 8]>()));
     export_to_path(db, collection, staging.clone(), None).await?;
 
     let result = async {
@@ -943,8 +844,20 @@ async fn export_to_saf(
     result
 }
 
+/// True if an error (or anything it wraps) is an "already exists" I/O error.
+fn is_already_exists(e: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cur = Some(e);
+    while let Some(err) = cur {
+        if let Some(io) = err.downcast_ref::<std::io::Error>() {
+            return io.kind() == std::io::ErrorKind::AlreadyExists || io.raw_os_error() == Some(17);
+        }
+        cur = err.source();
+    }
+    false
+}
+
 async fn export_to_path(
-    db: impl iroh_blobs::store::Store,
+    db: &Store,
     collection: Collection,
     root: PathBuf,
     window: Option<&tauri::Window>,
@@ -987,19 +900,15 @@ async fn export_to_path(
                 n += 1;
             } else {
                 match db
-                    .export(
+                    .export_with_opts(ExportOptions {
                         hash,
-                        candidate.clone(),
-                        ExportMode::TryReference,
-                        Box::new(move |_position| Ok(())),
-                    )
+                        target: candidate.clone(),
+                        mode: ExportMode::TryReference,
+                    })
                     .await
                 {
-                    Ok(()) => break,
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::AlreadyExists
-                            || e.raw_os_error() == Some(17) =>
-                    {
+                    Ok(_) => break,
+                    Err(e) if is_already_exists(&e) => {
                         warn!("{} is taken, trying another name", candidate.display());
                         n += 1;
                     }
@@ -1015,264 +924,102 @@ async fn export_to_path(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-struct SendStatus {
-    /// the multiprogress bar
-    mp: MultiProgress,
-}
-
-impl SendStatus {
-    fn new() -> Self {
-        let mp = MultiProgress::new();
-        mp.set_draw_target(ProgressDrawTarget::stderr());
-        Self { mp }
-    }
-
-    fn new_client(&self) -> ClientStatus {
-        let current = self.mp.add(ProgressBar::hidden());
-        current.set_style(
-            ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
-                .unwrap(),
-        );
-        current.enable_steady_tick(Duration::from_millis(100));
-        current.set_message("waiting for requests");
-        ClientStatus {
-            current: current.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ClientStatus {
-    current: Arc<ProgressBar>,
-}
-
-impl Drop for ClientStatus {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.current) == 1 {
-            self.current.finish_and_clear();
-        }
-    }
-}
-
-impl CustomEventSender for ClientStatus {
-    fn send(&self, event: iroh_blobs::provider::Event) -> Boxed<()> {
-        self.try_send(event);
-        Box::pin(std::future::ready(()))
-    }
-
-    fn try_send(&self, event: provider::Event) {
-        tracing::info!("{:?}", event);
-        let msg = match event {
-            provider::Event::ClientConnected { connection_id } => {
-                Some(format!("{} got connection", connection_id))
-            }
-            provider::Event::TransferBlobCompleted {
-                connection_id,
-                hash,
-                index,
-                size,
-                ..
-            } => Some(format!(
-                "{} transfer blob completed {} {} {}",
-                connection_id,
-                hash,
-                index,
-                HumanBytes(size)
-            )),
-            provider::Event::TransferCompleted {
-                connection_id,
-                stats,
-                ..
-            } => Some(format!(
-                "{} transfer completed {} {}",
-                connection_id,
-                stats.send.write_bytes.size,
-                HumanDuration(stats.send.write_bytes.stats.duration)
-            )),
-            provider::Event::TransferAborted { connection_id, .. } => {
-                Some(format!("{} transfer completed", connection_id))
-            }
-            _ => None,
-        };
-        if let Some(msg) = msg {
-            self.current.set_message(msg);
-        }
-    }
-}
-
-// Extended ClientStatus that can emit Tauri events
-#[derive(Clone)]
-struct TauriClientStatus {
-    current: Arc<ProgressBar>,
+/// Watches downloads of what this device is sharing and tells the UI how much
+/// has been sent (`send_transfer_started`, `send_transfer_progress`).
+async fn show_provide_progress(
+    mut recv: tokio::sync::mpsc::Receiver<ProviderMessage>,
     window: Option<tauri::Window>,
-    total_size: Arc<std::sync::Mutex<u64>>,
-    start_time: Arc<std::sync::Mutex<Option<Instant>>>,
-}
-
-// Manual Debug implementation since tauri::Window doesn't implement Debug
-impl std::fmt::Debug for TauriClientStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TauriClientStatus")
-            .field("window", &self.window.is_some())
-            .field("total_size", &self.total_size)
-            .field("start_time", &self.start_time)
-            .finish()
-    }
-}
-
-impl TauriClientStatus {
-    fn new(mp: &MultiProgress, window: Option<tauri::Window>, total_size: u64) -> Self {
-        let current = mp.add(ProgressBar::hidden());
-        current.set_style(
-            ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
-                .unwrap(),
-        );
-        current.enable_steady_tick(Duration::from_millis(100));
-        current.set_message("waiting for requests");
-
-        Self {
-            current: current.into(),
-            window,
-            total_size: Arc::new(std::sync::Mutex::new(total_size)),
-            start_time: Arc::new(std::sync::Mutex::new(None)),
-        }
-    }
-}
-
-impl Drop for TauriClientStatus {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.current) == 1 {
-            self.current.finish_and_clear();
-        }
-    }
-}
-
-impl CustomEventSender for TauriClientStatus {
-    fn send(&self, event: iroh_blobs::provider::Event) -> Boxed<()> {
-        self.try_send(event);
-        Box::pin(std::future::ready(()))
-    }
-
-    fn try_send(&self, event: provider::Event) {
-        tracing::info!("TauriClientStatus event: {:?}", event);
-
-        match &event {
-            provider::Event::ClientConnected { connection_id } => {
-                let msg = format!("{} got connection", connection_id);
-                self.current.set_message(msg.clone());
-
-                // Initialize start time
-                if let Ok(mut start) = self.start_time.lock() {
-                    *start = Some(Instant::now());
-                }
-
-                if let Some(ref window) = self.window {
-                    let _ = window.emit("send_transfer_started", ());
-                }
-            }
-            provider::Event::TransferBlobCompleted {
-                connection_id,
-                hash,
-                index,
-                size,
-                ..
-            } => {
-                let msg = format!(
-                    "{} transfer blob completed {} {} {}",
-                    connection_id,
-                    hash,
-                    index,
-                    HumanBytes(*size)
-                );
-                self.current.set_message(msg);
-
-                // Emit progress event
-                if let Some(ref window) = self.window {
-                    if let Ok(start) = self.start_time.lock() {
-                        if let Some(start_instant) = *start {
-                            let elapsed = start_instant.elapsed();
-                            let elapsed_ms = elapsed.as_millis() as u64;
-
-                            if let Ok(total_size) = self.total_size.lock() {
-                                // We can't track exact bytes transferred easily, but we can estimate
-                                // based on blob completion. For now, emit an event on each blob completion.
-                                let speed = if elapsed.as_secs_f64() > 0.0 {
-                                    (*size as f64 / elapsed.as_secs_f64()) as u64
-                                } else {
-                                    0
-                                };
-
-                                let _ = window.emit(
-                                    "send_transfer_progress",
-                                    crate::events::TransferProgressEvent {
-                                        bytes_transferred: *size,
-                                        total_bytes: *total_size,
-                                        percentage: (*size as f64 / *total_size as f64 * 100.0)
-                                            .min(100.0),
-                                        speed_bytes_per_sec: speed,
-                                        elapsed_ms,
-                                        eta_ms: 0, // Hard to estimate for sender
-                                    },
-                                );
-                            }
+    total_size: Arc<std::sync::atomic::AtomicU64>,
+) {
+    let mut tasks = FuturesUnordered::new();
+    loop {
+        tokio::select! {
+            biased;
+            item = recv.recv() => {
+                let Some(item) = item else { break };
+                match item {
+                    ProviderMessage::ClientConnectedNotify(_) => {
+                        if let Some(win) = &window {
+                            let _ = win.emit("send_transfer_started", ());
                         }
                     }
-                }
-            }
-            provider::Event::TransferCompleted {
-                connection_id,
-                stats,
-                ..
-            } => {
-                let msg = format!(
-                    "{} transfer completed {} {}",
-                    connection_id,
-                    stats.send.write_bytes.size,
-                    HumanDuration(stats.send.write_bytes.stats.duration)
-                );
-                self.current.set_message(msg);
-
-                if let Some(ref window) = self.window {
-                    if let Ok(total_size) = self.total_size.lock() {
-                        let _ = window.emit(
-                            "send_transfer_progress",
-                            crate::events::TransferProgressEvent {
-                                bytes_transferred: stats.send.write_bytes.size,
-                                total_bytes: *total_size,
-                                percentage: 100.0,
-                                speed_bytes_per_sec: 0,
-                                elapsed_ms: stats.send.write_bytes.stats.duration.as_millis()
-                                    as u64,
-                                eta_ms: 0,
-                            },
-                        );
+                    ProviderMessage::GetRequestReceivedNotify(msg) => {
+                        tasks.push(track_request(msg.rx, window.clone(), total_size.clone()));
                     }
+                    _ => {}
                 }
             }
-            provider::Event::TransferAborted { connection_id, .. } => {
-                let msg = format!("{} transfer aborted", connection_id);
-                self.current.set_message(msg);
-            }
-            _ => {}
+            Some(_) = tasks.next(), if !tasks.is_empty() => {}
         }
     }
+    while tasks.next().await.is_some() {}
 }
 
-#[allow(dead_code)]
-fn make_download_progress() -> ProgressBar {
-    let pb = ProgressBar::hidden();
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{msg}{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} {binary_bytes_per_sec}",
-        )
-        .unwrap()
-        .progress_chars("#>-"),
-    );
-    pb
+/// Follows one download request from start to finish.
+async fn track_request(
+    mut rx: irpc::channel::mpsc::Receiver<RequestUpdate>,
+    window: Option<tauri::Window>,
+    total_size: Arc<std::sync::atomic::AtomicU64>,
+) {
+    use std::sync::atomic::Ordering;
+
+    let started = Instant::now();
+    let mut last_emit = Instant::now();
+    // A request covers every file in the share; offsets restart for each file.
+    let mut sent_in_finished_files = 0u64;
+    let mut current_file_size = 0u64;
+    let mut sent = 0u64;
+
+    let emit = |sent: u64, done: bool| {
+        let Some(win) = &window else { return };
+        let total = total_size.load(Ordering::Relaxed);
+        let elapsed = started.elapsed();
+        let speed = if elapsed.as_secs_f64() > 0.0 {
+            (sent as f64 / elapsed.as_secs_f64()) as u64
+        } else {
+            0
+        };
+        let percentage = if done || total == 0 {
+            100.0
+        } else {
+            (sent as f64 / total as f64 * 100.0).min(100.0)
+        };
+        let eta_ms = if speed > 0 && !done {
+            (total.saturating_sub(sent) as f64 / speed as f64 * 1000.0) as u64
+        } else {
+            0
+        };
+        let _ = win.emit(
+            "send_transfer_progress",
+            crate::events::TransferProgressEvent {
+                bytes_transferred: sent,
+                total_bytes: total,
+                percentage,
+                speed_bytes_per_sec: speed,
+                elapsed_ms: elapsed.as_millis() as u64,
+                eta_ms,
+            },
+        );
+    };
+
+    while let Ok(Some(update)) = rx.recv().await {
+        match update {
+            RequestUpdate::Started(msg) => {
+                sent_in_finished_files += current_file_size;
+                current_file_size = msg.size;
+            }
+            RequestUpdate::Progress(msg) => {
+                sent = sent_in_finished_files + msg.end_offset;
+                // at most ten updates a second
+                if last_emit.elapsed() >= Duration::from_millis(100) {
+                    emit(sent, false);
+                    last_emit = Instant::now();
+                }
+            }
+            RequestUpdate::Completed(_) => emit(sent, true),
+            RequestUpdate::Aborted(_) => {}
+        }
+    }
 }
 
 // use serde::{Deserialize, Serialize};
@@ -1410,205 +1157,10 @@ pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
     Ok(response.blobs)
 }
 
-#[allow(dead_code)]
-pub async fn show_download_progress(
-    recv: async_channel::Receiver<DownloadProgress>,
-    total_size: u64,
-) -> anyhow::Result<()> {
-    let mp = MultiProgress::new();
-    mp.set_draw_target(ProgressDrawTarget::stderr());
-    let op = mp.add(make_download_progress());
-    op.set_message(format!("{} Connecting ...\n", style("[1/3]").bold().dim()));
-    let mut total_done = 0;
-    let mut sizes = BTreeMap::new();
-    loop {
-        let x = recv.recv().await;
-        match x {
-            Ok(DownloadProgress::Connected) => {
-                op.set_message(format!("{} Requesting ...\n", style("[2/3]").bold().dim()));
-            }
-            Ok(DownloadProgress::FoundHashSeq { children, .. }) => {
-                op.set_message(format!(
-                    "{} Downloading {} blob(s)\n",
-                    style("[3/3]").bold().dim(),
-                    children + 1,
-                ));
-                op.set_length(total_size);
-                op.reset();
-            }
-            Ok(DownloadProgress::Found { id, size, .. }) => {
-                sizes.insert(id, size);
-            }
-            Ok(DownloadProgress::Progress { offset, .. }) => {
-                op.set_position(total_done + offset);
-            }
-            Ok(DownloadProgress::Done { id }) => {
-                total_done += sizes.remove(&id).unwrap_or_default();
-            }
-            Ok(DownloadProgress::AllDone(stats)) => {
-                op.finish_and_clear();
-                eprintln!(
-                    "Transferred {} in {}, {}/s",
-                    HumanBytes(stats.bytes_read),
-                    HumanDuration(stats.elapsed),
-                    HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64)
-                );
-                break;
-            }
-            Ok(DownloadProgress::Abort(e)) => {
-                anyhow::bail!("download aborted: {e:?}");
-            }
-            Err(e) => {
-                anyhow::bail!("error reading progress: {e:?}");
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn show_get_error(e: anyhow::Error) -> anyhow::Error {
-    if let Some(err) = e.downcast_ref::<DecodeError>() {
-        match err {
-            DecodeError::NotFound => {
-                eprintln!("{}", style("send side no longer has a file").yellow())
-            }
-            DecodeError::LeafNotFound(_) | DecodeError::ParentNotFound(_) => eprintln!(
-                "{}",
-                style("send side no longer has part of a file").yellow()
-            ),
-            DecodeError::Io(err) => eprintln!(
-                "{}",
-                style(format!("generic network error: {}", err)).yellow()
-            ),
-            DecodeError::Read(err) => eprintln!(
-                "{}",
-                style(format!("error reading data from quinn: {}", err)).yellow()
-            ),
-            DecodeError::LeafHashMismatch(_) | DecodeError::ParentHashMismatch(_) => {
-                eprintln!("{}", style("send side sent wrong data").red())
-            }
-        };
-    } else if let Some(header_error) = e.downcast_ref::<AtBlobHeaderNextError>() {
-        // TODO(iroh-bytes): get_to_db should have a concrete error type so you don't have to guess
-        match header_error {
-            AtBlobHeaderNextError::Io(err) => eprintln!(
-                "{}",
-                style(format!("generic network error: {}", err)).yellow()
-            ),
-            AtBlobHeaderNextError::Read(err) => eprintln!(
-                "{}",
-                style(format!("error reading data from quinn: {}", err)).yellow()
-            ),
-            AtBlobHeaderNextError::NotFound => {
-                eprintln!("{}", style("send side no longer has a file").yellow())
-            }
-        };
-    } else {
-        eprintln!(
-            "{}",
-            style(format!("generic error: {:?}", e.root_cause())).red()
-        );
-    }
+/// Logs why a download failed, and passes the error on.
+fn log_get_error(e: GetError) -> GetError {
+    warn!("Download failed: {e}");
     e
-}
-
-#[allow(dead_code)]
-pub async fn receive(args: ReceiveArgs, storage_file_path: String) -> anyhow::Result<()> {
-    let cfg = config();
-    let ticket = args.ticket;
-    let addr = ticket.node_addr().clone();
-
-    info!("Starting file receive from node: {}", addr.node_id);
-
-    let secret_key = get_or_create_secret(args.common.verbose > 0)?;
-    let mut builder = Endpoint::builder()
-        .alpns(vec![])
-        .secret_key(secret_key)
-        .relay_mode(resolve_relay_mode(args.common.relay).await);
-
-    if ticket.node_addr().relay_url.is_none() && ticket.node_addr().direct_addresses.is_empty() {
-        builder = builder.add_discovery(|_| Some(DnsDiscovery::n0_dns()));
-    }
-    if let Some(addr) = args.common.magic_ipv4_addr {
-        builder = builder.bind_addr_v4(addr);
-    }
-    if let Some(addr) = args.common.magic_ipv6_addr {
-        builder = builder.bind_addr_v6(addr);
-    }
-    let endpoint = builder.bind().await?;
-    let dir_name = format!(
-        "{}get-{}",
-        cfg.storage.temp_dir_prefix,
-        ticket.hash().to_hex()
-    );
-    let iroh_data_dir = CWD.join(dir_name);
-    let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
-    let mp = MultiProgress::new();
-    let connect_progress = mp.add(ProgressBar::hidden());
-    connect_progress.set_draw_target(ProgressDrawTarget::stderr());
-    connect_progress.set_style(ProgressStyle::default_spinner());
-    connect_progress.set_message(format!("connecting to {}", addr.node_id));
-    let connection = endpoint.connect(addr, iroh_blobs::protocol::ALPN).await?;
-    let hash_and_format = HashAndFormat {
-        hash: ticket.hash(),
-        format: ticket.format(),
-    };
-    connect_progress.finish_and_clear();
-    let (send, recv) = async_channel::bounded(32);
-    let progress = iroh_blobs::util::progress::AsyncChannelProgressSender::new(send);
-    let (_hash_seq, sizes) =
-        get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32)
-            .await
-            .map_err(show_get_error)?;
-    let total_size = sizes.iter().sum::<u64>();
-    let total_files = sizes.len().saturating_sub(1);
-    let payload_size = sizes.iter().skip(1).sum::<u64>();
-    info!(
-        "Getting collection {} {} files, {}",
-        print_hash(&ticket.hash(), args.common.format),
-        total_files,
-        HumanBytes(payload_size)
-    );
-    // print the details of the collection only in verbose mode
-    if args.common.verbose > 0 {
-        debug!(
-            "Getting {} blobs in total, {}",
-            sizes.len(),
-            HumanBytes(total_size)
-        );
-    }
-    let _task = tokio::spawn(show_download_progress(recv, total_size));
-    let get_conn = || async move { Ok(connection) };
-    let stats = iroh_blobs::get::db::get_to_db(&db, get_conn, &hash_and_format, progress)
-        .await
-        .map_err(|e| show_get_error(anyhow::anyhow!(e)))?;
-    let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
-    if args.common.verbose > 0 {
-        for (name, hash) in collection.iter() {
-            debug!("    {} {name}", print_hash(hash, args.common.format));
-        }
-    }
-    if let Some((name, _)) = collection.iter().next() {
-        if let Some(first) = name.split('/').next() {
-            info!("Downloading to: {}", first);
-        }
-    }
-    let exported = export(db, collection, storage_file_path.clone(), None).await;
-    // Always drop the work dir: it is named after the content, so a leftover
-    // one (e.g. after a cancelled export) would poison the next receive.
-    let _ = tokio::fs::remove_dir_all(iroh_data_dir).await;
-    exported?;
-    if args.common.verbose > 0 {
-        info!(
-            "Downloaded {} files, {}. Took {} ({}/s)",
-            total_files,
-            HumanBytes(payload_size),
-            HumanDuration(stats.elapsed),
-            HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64),
-        );
-    }
-    Ok(())
 }
 
 // In your existing module (or in a new one), add the following:
@@ -1622,25 +1174,25 @@ pub async fn start_send(
     let secret_key = get_or_create_secret(args.common.verbose > 0)?;
 
     debug!("Building endpoint");
-    let mut builder = Endpoint::builder()
+    let relay_mode = resolve_relay_mode(args.common.relay).await;
+    let mut builder = Endpoint::builder(presets::N0)
         .alpns(vec![iroh_blobs::protocol::ALPN.to_vec()])
         .secret_key(secret_key)
-        .relay_mode(resolve_relay_mode(args.common.relay).await);
+        .relay_mode(relay_mode.clone());
 
     if args.ticket_type == AddrInfoOptions::Id {
-        builder =
-            builder.add_discovery(|secret_key| Some(PkarrPublisher::n0_dns(secret_key.clone())));
+        builder = builder.address_lookup(PkarrPublisher::n0_dns());
     }
     if let Some(addr) = args.common.magic_ipv4_addr {
-        builder = builder.bind_addr_v4(addr);
+        builder = builder.bind_addr(addr)?;
     }
     if let Some(addr) = args.common.magic_ipv6_addr {
-        builder = builder.bind_addr_v6(addr);
+        builder = builder.bind_addr(addr)?;
     }
 
     // Create a unique directory for this sending session.
     debug!("Creating blobs data directory");
-    let suffix = rand::thread_rng().gen::<[u8; 16]>();
+    let suffix = rand::rng().random::<[u8; 16]>();
     let blobs_data_dir = CWD.join(format!(
         "{}send-{}",
         cfg.storage.temp_dir_prefix,
@@ -1664,51 +1216,57 @@ pub async fn start_send(
     debug!("Binding endpoint");
     let endpoint = builder.bind().await?;
 
+    debug!("Creating blobs store");
+    let store = FsStore::load(&blobs_data_dir).await?;
+    // The share's total size is only known after the import, so the progress
+    // tracker reads it from here.
+    let total_size = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(32);
+    tokio::spawn(show_provide_progress(
+        progress_rx,
+        window.clone(),
+        total_size.clone(),
+    ));
+    let blobs = BlobsProtocol::new(
+        &store,
+        Some(EventSender::new(
+            progress_tx,
+            EventMask {
+                connected: ConnectMode::Notify,
+                get: provider::events::RequestMode::NotifyLog,
+                ..EventMask::DEFAULT
+            },
+        )),
+    );
+
     info!("Importing file: {:?}", args.path);
     let path = args.path;
     // Import first to get the size, which we'll need for progress tracking
-    // Use import_with_window to emit progress events
-    let db_store = iroh_blobs::store::fs::Store::load(&blobs_data_dir).await?;
     let (temp_tag, size, collection) =
-        import_with_window(path.clone(), db_store, window.clone()).await?;
+        import_with_window(path.clone(), blobs.store(), window.clone()).await?;
+    total_size.store(size, std::sync::atomic::Ordering::Relaxed);
     info!("Import complete, size: {}", HumanBytes(size));
-    let hash = *temp_tag.hash();
-
-    debug!("Creating blobs store");
-    let blobs = if let Some(ref win) = window {
-        // Use TauriClientStatus for progress tracking
-        let mp = MultiProgress::new();
-        mp.set_draw_target(ProgressDrawTarget::stderr());
-        let client_status = TauriClientStatus::new(&mp, Some(win.clone()), size);
-
-        Blobs::persistent(&blobs_data_dir)
-            .await?
-            .events(client_status.into())
-            .build(&endpoint)
-    } else {
-        // Use regular SendStatus without window
-        let ps = SendStatus::new();
-        Blobs::persistent(&blobs_data_dir)
-            .await?
-            .events(ps.new_client().into())
-            .build(&endpoint)
-    };
+    let hash = temp_tag.hash();
 
     debug!("Building router");
     let router = iroh::protocol::Router::builder(endpoint)
         .accept(iroh_blobs::ALPN, blobs.clone())
-        .spawn()
-        .await?;
+        .spawn();
 
-    // Wait for the endpoint to be ready.
-    debug!("Waiting for relay initialization");
-    let _ = router.endpoint().home_relay().initialized().await?;
-    debug!("Relay initialized");
+    // Wait for the endpoint to find its address before making a ticket.
+    debug!("Waiting for the endpoint to come online");
+    let ep = router.endpoint().clone();
+    tokio::time::timeout(Duration::from_secs(30), async move {
+        if !matches!(relay_mode, RelayMode::Disabled) {
+            let _ = ep.online().await;
+        }
+    })
+    .await?;
+    debug!("Endpoint online");
 
-    debug!("Getting node address");
-    let mut addr = router.endpoint().node_addr().await?;
+    let mut addr = router.endpoint().addr();
     apply_options(&mut addr, args.ticket_type);
-    let ticket = BlobTicket::new(addr, hash, BlobFormat::HashSeq)?;
+    let ticket = BlobTicket::new(addr, hash, BlobFormat::HashSeq);
     info!("Ticket created successfully");
 
     let entry_type = if path.is_file() { "file" } else { "directory" };
@@ -1912,50 +1470,11 @@ pub async fn stop_sharing(state: State<'_, SharedSenderState>) -> anyhow::Result
 }
 
 #[allow(dead_code)]
-pub async fn receive_file_minimal(
-    ticket: String,
-    file_storage_path: String,
-    verbose: bool,
-) -> anyhow::Result<String> {
-    debug!("Receiving file from ticket: {}", ticket);
-
-    let blob = match get_blob(ticket).await {
-        Ok(blob) => blob,
-        Err(err) => {
-            error!("Failed to get blob: {}", err);
-            return Err(anyhow::anyhow!("Failed to get blob: {}", err));
-        }
-    };
-
-    // Parse the ticket string into a BlobTicket.
-    // let ticket = BlobTicket::from_str(&ticket)?;
-    let ticket = BlobTicket::from_str(&blob[0])?;
-
-    // Construct a minimal ReceiveArgs using the ticket and verbose flag.
-    let receive_args = ReceiveArgs {
-        ticket,
-        common: CommonArgs {
-            magic_ipv4_addr: None,
-            magic_ipv6_addr: None,
-            format: Format::Hex,
-            verbose: if verbose { 1 } else { 0 },
-            relay: RelayModeOption::Default,
-        },
-    };
-
-    let res = receive(receive_args, file_storage_path).await;
-
-    match res {
-        Ok(()) => Ok("success".to_string()),
-        Err(e) => Err(e),
-    }
-}
-
 pub async fn receive_file_with_progress(
     ticket: String,
     file_storage_path: String,
     verbose: bool,
-    window: tauri::Window,
+    window: Events,
 ) -> anyhow::Result<ReceiveSummary> {
     debug!("Receiving file from ticket: {}", ticket);
 
@@ -1986,6 +1505,32 @@ pub async fn receive_file_with_progress(
 
     info!("Successfully downloaded all {} file(s)", blobs.len());
     Ok(ReceiveSummary::combine(parts))
+}
+
+/// Where a transfer reports its progress: the app window, or nowhere (tests).
+#[derive(Clone)]
+pub struct Events(Option<tauri::Window>);
+
+impl Events {
+    pub fn new(window: tauri::Window) -> Self {
+        Self(Some(window))
+    }
+
+    #[cfg(test)]
+    fn none() -> Self {
+        Self(None)
+    }
+
+    fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> tauri::Result<()> {
+        match &self.0 {
+            Some(window) => window.emit(event, payload),
+            None => Ok(()),
+        }
+    }
+
+    fn window(&self) -> Option<&tauri::Window> {
+        self.0.as_ref()
+    }
 }
 
 /// What a finished receive tells the UI.
@@ -2035,8 +1580,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// What a successful download reports, for the summary.
 struct Fetched {
-    stats: iroh_blobs::get::Stats,
-    total_files: usize,
+    stats: Stats,
+    /// Size of the files themselves, without the collection's bookkeeping.
     payload_size: u64,
 }
 
@@ -2044,9 +1589,9 @@ struct Fetched {
 /// downloaded, so a retry resumes rather than starting over.
 async fn fetch_with_retry(
     ticket: &BlobTicket,
-    db: &iroh_blobs::store::fs::Store,
+    db: &Store,
     verbose: bool,
-    window: &tauri::Window,
+    window: &Events,
 ) -> anyhow::Result<Fetched> {
     let mut attempt = 1;
     loop {
@@ -2067,14 +1612,14 @@ async fn fetch_with_retry(
 }
 
 /// One attempt: fresh endpoint, connect to the sender and download into `db`.
+/// Only what is still missing is requested, which is what makes a download resumable.
 async fn fetch_once(
     ticket: &BlobTicket,
-    db: &iroh_blobs::store::fs::Store,
+    db: &Store,
     verbose: bool,
-    window: &tauri::Window,
+    window: &Events,
     attempt: u32,
 ) -> anyhow::Result<Fetched> {
-    let addr = ticket.node_addr().clone();
     let window = window.clone();
     // Keep the attempt visible, or the retry message is overwritten within seconds.
     let attempt_note = if attempt > 1 {
@@ -2082,163 +1627,132 @@ async fn fetch_once(
     } else {
         String::new()
     };
+    let hash_and_format = ticket.hash_and_format();
+
+    // Part or all of it may already be here from an earlier attempt or session.
+    let local = db.remote().local(hash_and_format).await?;
+    if local.is_complete() {
+        info!("Everything is already downloaded");
+        return Ok(Fetched {
+            stats: Stats::default(),
+            payload_size: local.local_bytes(),
+        });
+    }
+    let local_size = local.local_bytes();
+
     let _ = window.emit(
         "download_status",
         format!("Initializing connection{attempt_note}..."),
     );
-
     let secret_key = get_or_create_secret(verbose)?;
-    let mut builder = Endpoint::builder()
+    let mut builder = Endpoint::builder(presets::N0)
         .alpns(vec![])
         .secret_key(secret_key)
         .relay_mode(resolve_relay_mode(RelayModeOption::Default).await);
 
-    if ticket.node_addr().relay_url.is_none() && ticket.node_addr().direct_addresses.is_empty() {
-        builder = builder.add_discovery(|_| Some(DnsDiscovery::n0_dns()));
+    if ticket.addr().relay_urls().next().is_none() && ticket.addr().ip_addrs().next().is_none() {
+        builder = builder.address_lookup(DnsAddressLookup::n0_dns());
     }
-
     let endpoint = builder.bind().await?;
-    let _ = window.emit(
-        "download_status",
-        format!("Connecting to sender{attempt_note}..."),
-    );
-    let connection = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        endpoint.connect(addr, iroh_blobs::protocol::ALPN),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Timed out connecting to the sender"))??;
-    let hash_and_format = HashAndFormat {
-        hash: ticket.hash(),
-        format: ticket.format(),
-    };
 
-    let (send, recv) = async_channel::bounded(32);
-    let progress = iroh_blobs::util::progress::AsyncChannelProgressSender::new(send);
-    let (_hash_seq, sizes) =
-        get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32)
-            .await
-            .map_err(show_get_error)?;
+    let result = async {
+        let _ = window.emit(
+            "download_status",
+            format!("Connecting to sender{attempt_note}..."),
+        );
+        let connection = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            endpoint.connect(ticket.addr().clone(), iroh_blobs::protocol::ALPN),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Timed out connecting to the sender"))??;
 
-    let total_size = sizes.iter().sum::<u64>();
-    let total_files = sizes.len().saturating_sub(1);
-    let payload_size = sizes.iter().skip(1).sum::<u64>();
+        let (_hash_seq, sizes) =
+            get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32, None)
+                .await
+                .map_err(log_get_error)?;
+        let total_size = sizes.iter().copied().sum::<u64>();
+        // the first entry is the collection's own bookkeeping, then come the files
+        let payload_size = sizes.iter().skip(1).copied().sum::<u64>();
+        info!(
+            "Getting collection {} {} files, {} ({} already here)",
+            print_hash(&ticket.hash(), Format::Hex),
+            sizes.len().saturating_sub(1),
+            HumanBytes(payload_size),
+            HumanBytes(local_size),
+        );
+        let _ = window.emit("download_status", "Downloading...");
 
-    info!(
-        "Getting collection {} {} files, {}",
-        print_hash(&ticket.hash(), Format::Hex),
-        total_files,
-        HumanBytes(payload_size)
-    );
-
-    let _ = window.emit(
-        "download_status",
-        format!("Downloading {} files...", total_files),
-    );
-
-    // Spawn task to monitor progress and emit events
-    let window_clone = window.clone();
-    let start_time = Instant::now();
-    let _task = tokio::spawn(async move {
-        let mut total_done = 0u64;
-        let mut sizes_map = BTreeMap::new();
+        let mut stream = db
+            .remote()
+            .execute_get(connection, local.missing())
+            .stream();
         let mut last_update = Instant::now();
-        // Where this session started. A resumed download begins part-way, and what was
-        // already on disk must not count towards the speed or the time remaining.
-        let mut session_start: Option<(u64, Instant)> = None;
-
-        loop {
-            let x = recv.recv().await;
-            match x {
-                Ok(DownloadProgress::Connected) => {
-                    let _ = window_clone.emit("download_status", "Connected, requesting data...");
-                }
-                Ok(DownloadProgress::FoundHashSeq { .. }) => {
-                    let _ = window_clone.emit("download_status", "Downloading...");
-                }
-                Ok(DownloadProgress::Found { id, size, .. }) => {
-                    sizes_map.insert(id, size);
-                }
-                Ok(DownloadProgress::Progress { offset, .. }) => {
-                    let current_bytes = total_done + offset;
-                    let elapsed = start_time.elapsed();
-                    let elapsed_ms = elapsed.as_millis() as u64;
-
+        let started = Instant::now();
+        let mut stats = Stats::default();
+        while let Some(item) = stream.next().await {
+            match item {
+                GetProgressItem::Progress(offset) => {
                     // Update every 100ms to avoid too many events
-                    if last_update.elapsed().as_millis() > 100 {
-                        let percentage = (current_bytes as f64 / total_size as f64) * 100.0;
-                        let (start_bytes, started_at) =
-                            *session_start.get_or_insert((current_bytes, Instant::now()));
-                        let session_secs = started_at.elapsed().as_secs_f64();
-                        let speed = if session_secs > 0.0 {
-                            (current_bytes.saturating_sub(start_bytes) as f64 / session_secs) as u64
+                    if last_update.elapsed() > Duration::from_millis(100) {
+                        // `offset` counts this session only, so the speed is not
+                        // inflated by what a resumed download already had.
+                        let current_bytes = local_size + offset;
+                        let elapsed = started.elapsed();
+                        let speed = if elapsed.as_secs_f64() > 0.0 {
+                            (offset as f64 / elapsed.as_secs_f64()) as u64
                         } else {
                             0
                         };
-
                         let eta_ms = if speed > 0 {
-                            let remaining_bytes = total_size.saturating_sub(current_bytes);
-                            ((remaining_bytes as f64 / speed as f64) * 1000.0) as u64
+                            let remaining = total_size.saturating_sub(current_bytes);
+                            ((remaining as f64 / speed as f64) * 1000.0) as u64
                         } else {
                             0
                         };
-
-                        let _ = window_clone.emit(
+                        let _ = window.emit(
                             "transfer_progress",
                             crate::events::TransferProgressEvent {
                                 bytes_transferred: current_bytes,
                                 total_bytes: total_size,
-                                percentage,
+                                percentage: (current_bytes as f64 / total_size.max(1) as f64
+                                    * 100.0)
+                                    .min(100.0),
                                 speed_bytes_per_sec: speed,
-                                elapsed_ms,
+                                elapsed_ms: elapsed.as_millis() as u64,
                                 eta_ms,
                             },
                         );
-
                         last_update = Instant::now();
                     }
                 }
-                Ok(DownloadProgress::Done { id }) => {
-                    total_done += sizes_map.remove(&id).unwrap_or_default();
-                }
-                Ok(DownloadProgress::AllDone(_stats)) => {
+                GetProgressItem::Done(value) => {
+                    stats = value;
                     break;
                 }
-                Ok(DownloadProgress::Abort(e)) => {
-                    let _ =
-                        window_clone.emit("download_error", format!("Download aborted: {:?}", e));
-                    break;
-                }
-                Err(_) => {
-                    break;
-                }
-                _ => {}
+                GetProgressItem::Error(cause) => anyhow::bail!(log_get_error(cause)),
             }
         }
-    });
-
-    let get_conn = || async move { Ok(connection) };
-    let stats = iroh_blobs::get::db::get_to_db(db, get_conn, &hash_and_format, progress)
-        .await
-        .map_err(|e| show_get_error(anyhow::anyhow!(e)))?;
-
-    Ok(Fetched {
-        stats,
-        total_files,
-        payload_size,
-    })
+        anyhow::Ok(Fetched {
+            stats,
+            payload_size,
+        })
+    }
+    .await;
+    endpoint.close().await;
+    result
 }
 
 async fn receive_single_blob(
     blob_str: &str,
     file_storage_path: &str,
     verbose: bool,
-    window: tauri::Window,
+    window: Events,
 ) -> anyhow::Result<ReceiveSummary> {
     let ticket = BlobTicket::from_str(blob_str)?;
     info!(
-        "Starting file receive from node: {}",
-        ticket.node_addr().node_id
+        "Starting file receive from endpoint: {}",
+        ticket.addr().id.fmt_short()
     );
 
     let cfg = config();
@@ -2248,19 +1762,29 @@ async fn receive_single_blob(
         ticket.hash().to_hex()
     );
     let iroh_data_dir = CWD.join(dir_name);
-    let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
+    let db = FsStore::load(&iroh_data_dir).await?;
 
+    // On failure the store (and its partial download) is kept, so the next
+    // try resumes where this one stopped.
     let Fetched {
         stats,
-        total_files,
         payload_size,
-    } = fetch_with_retry(&ticket, &db, verbose, &window).await?;
-    let hash_and_format = HashAndFormat {
-        hash: ticket.hash(),
-        format: ticket.format(),
+    } = match fetch_with_retry(&ticket, &db, verbose, &window).await {
+        Ok(fetched) => fetched,
+        Err(e) => {
+            let _ = db.shutdown().await;
+            return Err(e);
+        }
     };
 
-    let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
+    let collection = match Collection::load(ticket.hash(), db.as_ref()).await {
+        Ok(collection) => collection,
+        Err(e) => {
+            let _ = db.shutdown().await;
+            return Err(e.into());
+        }
+    };
+    let total_files = collection.len();
     let received_name = summary_name(collection.iter().map(|(name, _)| name.as_str()));
 
     if let Some((name, _)) = collection.iter().next() {
@@ -2269,18 +1793,24 @@ async fn receive_single_blob(
         }
     }
 
-    let exported = export(db, collection, file_storage_path.to_string(), Some(&window)).await;
+    let exported = export(
+        &db,
+        collection,
+        file_storage_path.to_string(),
+        window.window(),
+    )
+    .await;
     // Always drop the work dir: it is named after the content, so a leftover
     // one (e.g. after a cancelled export) would poison the next receive.
+    let _ = db.shutdown().await;
     let _ = tokio::fs::remove_dir_all(iroh_data_dir).await;
     exported?;
 
     info!(
-        "Downloaded {} files, {}. Took {} ({}/s)",
+        "Downloaded {} files, {}. Took {}",
         total_files,
         HumanBytes(payload_size),
         HumanDuration(stats.elapsed),
-        HumanBytes((stats.bytes_read as f64 / stats.elapsed.as_secs_f64()) as u64),
     );
 
     Ok(ReceiveSummary {
@@ -2369,5 +1899,81 @@ mod receive_summary_tests {
             (two.name.as_str(), two.files, two.bytes, two.download_ms),
             ("2 items", 4, 20, 10)
         );
+    }
+}
+
+/// Runs the real send and receive code against each other over loopback: no
+/// window, no relay, no internet.
+#[cfg(test)]
+mod roundtrip_tests {
+    use super::*;
+
+    /// Points HOME at a temp dir before the app's lazy statics read it, so the
+    /// tests never touch the real Documents folder.
+    fn isolated_home() -> &'static std::path::Path {
+        static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        HOME.get_or_init(|| {
+            let dir = tempfile::tempdir().expect("temp dir");
+            #[cfg(unix)]
+            std::env::set_var("HOME", dir.path());
+            crate::config::AppConfig::init();
+            dir
+        })
+        .path()
+    }
+
+    async fn share(path: &Path) -> (BlobTicket, iroh::protocol::Router, PathBuf) {
+        let args = SendArgs {
+            path: path.to_path_buf(),
+            ticket_type: AddrInfoOptions::RelayAndAddresses,
+            common: CommonArgs {
+                magic_ipv4_addr: None,
+                magic_ipv6_addr: None,
+                format: Format::Hex,
+                verbose: 0,
+                relay: RelayModeOption::Disabled,
+            },
+        };
+        start_send(args, None).await.expect("start sharing")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_folder_arrives_intact_and_a_second_copy_is_numbered() {
+        let home = isolated_home();
+        let src = home.join("folder-to-share");
+        std::fs::create_dir_all(src.join("sub/deep")).unwrap();
+        std::fs::write(src.join("a.txt"), b"hello").unwrap();
+        let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(src.join("sub/big.bin"), &big).unwrap();
+        std::fs::write(src.join("sub/deep/c.txt"), b"deep").unwrap();
+
+        let (ticket, router, work_dir) = share(&src).await;
+        let dest = home.join("received");
+        let receive = || {
+            receive_file_with_progress(
+                ticket.to_string(),
+                dest.to_string_lossy().into_owned(),
+                false,
+                Events::none(),
+            )
+        };
+
+        let summary = receive().await.expect("first receive");
+        assert_eq!(summary.name, "folder-to-share");
+        assert_eq!(summary.files, 3);
+        assert_eq!(summary.bytes, 5 + 3_000_000 + 4);
+        let root = dest.join("folder-to-share");
+        assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(root.join("sub/big.bin")).unwrap(), big);
+        assert_eq!(std::fs::read(root.join("sub/deep/c.txt")).unwrap(), b"deep");
+
+        // Receiving the same thing again must not overwrite: with no window to
+        // ask, the files are kept side by side with a number.
+        receive().await.expect("second receive");
+        assert_eq!(std::fs::read(root.join("a (1).txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"hello");
+
+        router.shutdown().await.ok();
+        let _ = std::fs::remove_dir_all(work_dir);
     }
 }

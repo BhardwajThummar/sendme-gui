@@ -20,37 +20,35 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-fs = "2"
 percent-encoding = "2"
-# netdev 0.31 (via iroh) imports libc::RTAX_MAX, which libc 0.2.190 moved out of
-# the crate root, breaking iOS builds. Drop this once iroh/netdev are updated.
+# netdev (pulled in by iroh) uses libc items that libc 0.2.190+ no longer exports
+# on iOS (RTAX_MAX, in6_ifreq), which breaks iOS builds. Revisit when netdev or
+# libc fixes this; check with `yarn ios:build` before lifting it.
 libc = ">=0.2.150, <0.2.190"
 tauri-plugin-shell = "2"
 tauri-plugin-barcode-scanner = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-async-channel = "2.3.1"
 clap = { version = "4.4.10", features = ["derive"] }
-console = "0.16.4"
 derive_more = { version = "2.1.1", features = [
     "display",
     "from_str"
 ] }
 anyhow = "1.0.75"
 futures-buffered = "0.2.4"
-futures-lite = "2.3.0"
 futures = "0.3"
 indicatif = "0.18.6"
-iroh-blobs = { version = "0.32", features = ["net_protocol"] }
-iroh-io = "0.6"
-iroh = "0.32"
+iroh-blobs = { version = "0.103.1" }
+iroh = "1.0.0"
+irpc = "0.17.0"
 num_cpus = "1.16.0"
-rand = "0.8.5"
+rand = "0.10"
 tokio = { version = "1.34.0", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 walkdir = "2.4.0"
 data-encoding = "2.6.0"
-n0-future = "0.1.2"
+n0-future = "0.3"
 dirs = "7.0"
 lazy_static = "1.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
@@ -61,3 +59,6 @@ tauri-plugin-android-fs = "29"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri-plugin-ios-folder = { path = "plugins/ios-folder" }
+
+[dev-dependencies]
+tempfile = "3"
