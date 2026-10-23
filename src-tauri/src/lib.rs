@@ -8,6 +8,7 @@ mod android_compat;
 mod background_manager;
 mod config;
 mod events;
+mod friendly_error;
 mod ios_compat;
 mod logger;
 mod sender_state;
@@ -238,9 +239,7 @@ async fn receive_file_with_stats(
         let result = match join_result {
             Ok(res) => res,
             Err(join_err) => {
-                let err_string = join_err.to_string();
-                let _ = window.emit("download_error", err_string.clone());
-                return Err(err_string);
+                return Err(report_download_error(&window, &join_err.to_string()));
             }
         };
 
@@ -253,11 +252,7 @@ async fn receive_file_with_stats(
                 );
                 Ok("success".to_string())
             }
-            Err(e) => {
-                // Emit error event if download failed
-                let _ = window.emit("download_error", e.to_string());
-                Err(e)
-            }
+            Err(e) => Err(report_download_error(&window, &e)),
         }
     }
 
@@ -295,12 +290,17 @@ async fn receive_file_with_stats(
         })
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| {
-            // Emit error event if download failed
-            let _ = window.emit("download_error", e.to_string());
-            e.to_string()
-        })
+        .map_err(|e| report_download_error(&window, &format!("{e:#}")))
     }
+}
+
+/// Logs the technical error, tells the UI a friendly version, and returns that
+/// version for the command's own `Err`.
+fn report_download_error(window: &Window, technical: &str) -> String {
+    logger::error!("Download failed: {}", technical);
+    let message = friendly_error::friendly_message(technical);
+    let _ = window.emit("download_error", message.clone());
+    message
 }
 
 // Builds the completion event from what the transfer actually received

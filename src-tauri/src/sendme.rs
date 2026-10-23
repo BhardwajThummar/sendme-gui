@@ -1383,12 +1383,28 @@ pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
 
     let url: String = format!("{}/api/code/{}", cfg.api.base_url, code);
 
-    let response = client
-        .get(&url)
-        .send()
-        .await?
-        .json::<GetBlobResponse>()
-        .await?;
+    // One retry: a flaky connection shouldn't make a valid code look broken.
+    let mut attempt = 1;
+    let response = loop {
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                return Err("code not found".into());
+            }
+            Ok(resp) if !resp.status().is_success() => {
+                return Err(format!("code server error ({})", resp.status()).into());
+            }
+            Ok(resp) => match resp.json::<GetBlobResponse>().await {
+                Ok(parsed) => break parsed,
+                Err(e) => return Err(format!("code server sent an unreadable reply: {e}").into()),
+            },
+            Err(e) if attempt < 2 => {
+                warn!("Code lookup failed ({e}), retrying");
+                attempt += 1;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            Err(e) => return Err(format!("code server unreachable: {e}").into()),
+        }
+    };
 
     info!("Successfully fetched {} blob(s)", response.blobs.len());
     Ok(response.blobs)

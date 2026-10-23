@@ -17,6 +17,14 @@ const json = (body, status = 200) =>
 const newCode = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(CODE_LENGTH)), (b) => ALPHABET[b % 32]).join("");
 
+// Per-IP rate limits (Cloudflare's limiter binding; see wrangler.toml). Guessing
+// codes needs many lookups, so this makes it impractical. Skipped if the binding
+// isn't there, e.g. in local tests.
+const limited = async (limiter, request) =>
+  limiter ? !(await limiter.limit({ key: request.headers.get("cf-connecting-ip") || "local" })).success : false;
+
+const tooMany = () => json({ error: "too many requests, try again in a minute" }, 429);
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
@@ -25,6 +33,7 @@ export default {
     if (pathname === "/") return new Response("ok");
 
     if (request.method === "POST" && pathname === "/api/code/") {
+      if (await limited(env.CREATE_LIMITER, request)) return tooMany();
       let blobs;
       try {
         ({ blobs } = await request.json());
@@ -50,6 +59,7 @@ export default {
 
     const match = pathname.match(/^\/api\/code\/([A-Za-z0-9]+)$/);
     if (request.method === "GET" && match) {
+      if (await limited(env.LOOKUP_LIMITER, request)) return tooMany();
       const stored = await env.CODES.get(match[1].toUpperCase());
       return stored ? json({ blobs: JSON.parse(stored) }) : json({ error: "not found" }, 404);
     }

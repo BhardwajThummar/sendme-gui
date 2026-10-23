@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   QR codes always work, and sending no longer fails when the server is down
 - The Download Complete screen shows what was actually received
 
+- Plain-language error messages (unknown code, code server down, can't reach
+  the sender, disk full, bad folder) instead of raw network errors
+- The code server rate-limits per IP, and has automated tests
+- iOS: the Apple Team ID comes from `APPLE_DEVELOPMENT_TEAM` and the generated
+  Xcode project is no longer tracked, so a Team ID can't be committed by
+  accident (`scripts/ci-local.sh` checks this)
+- README rewritten: shorter, with screenshots
+
 ### Removed
 
 - Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,

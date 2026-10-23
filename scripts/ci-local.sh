@@ -13,6 +13,13 @@ export CC="${CI_CC:-cc}" CXX="${CI_CXX:-c++}"
 
 step() { printf '\n\033[1;34m== %s\033[0m\n' "$1"; }
 
+step "No Apple Team ID committed"
+# iOS builds take the team from APPLE_DEVELOPMENT_TEAM; a real ID in a tracked file is a leak.
+if git grep -nE 'DEVELOPMENT_TEAM[:=] *[A-Z0-9]{10}\b' -- . ':!node_modules' | grep -v 'YOUR_TEAM_ID'; then
+  echo "A real Apple Team ID is in a tracked file (above). Use APPLE_DEVELOPMENT_TEAM instead." >&2
+  exit 1
+fi
+
 step "yarn install --frozen-lockfile"
 yarn install --frozen-lockfile
 
@@ -31,6 +38,9 @@ step "Rust clippy (all targets, all features)"
 
 step "Rust tests"
 (cd src-tauri && cargo test)
+
+step "Code server tests"
+(cd server && node --test)
 
 if [[ "${1:-}" == "--full" ]]; then
   step "Tauri build"
