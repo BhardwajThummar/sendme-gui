@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { fileUrlToPath, getDownloadsFolderPath, getSavedDownloadPath, saveDownloadPath } from "../utils/paths";
-import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, pickAndroidSaveDir } from "@/utils/androidPicker";
 import { isIOS } from "@/utils/platform";
 import { pickIosSaveDir } from "@/utils/iosPicker";
@@ -217,9 +216,6 @@ const FileReceive: React.FC = () => {
                 ? formatBytes(Math.floor(total_bytes / (elapsed_time_ms / 1000))) + "/s"
                 : "—",
           });
-
-          // Stop background service on completion
-          stopBackgroundService();
         })
       );
 
@@ -237,9 +233,6 @@ const FileReceive: React.FC = () => {
           logger.error("FileReceive", "Download failed", event.payload);
           setStatus("error");
           setStatusMessage(`Error: ${event.payload}`);
-
-          // Stop background service on error
-          stopBackgroundService();
           setProgress(0);
         })
       );
@@ -405,9 +398,6 @@ const FileReceive: React.FC = () => {
     setStatusMessage("Connecting to sender...");
     setProgress(0);
 
-    // Start background service for Android to keep download alive
-    startBackgroundService('receive', 1);
-
     try {
       await saveDownloadPath(downloadPath);
 
@@ -423,8 +413,6 @@ const FileReceive: React.FC = () => {
       setStatus("error");
       setStatusMessage(`Error: ${error}`);
       setProgress(0);
-      // Stop service on error
-      stopBackgroundService();
     }
   };
 

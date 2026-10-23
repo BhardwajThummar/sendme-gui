@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { startBackgroundService, stopBackgroundService } from "@/utils/backgroundService";
 import { isAndroid, openAndroidFilePicker, openAndroidFolderPicker } from "@/utils/androidPicker";
 import { isIOS } from "@/utils/platform";
 import { pickIosFolderToSend } from "@/utils/iosPicker";
@@ -295,9 +294,6 @@ const FileSend: React.FC = () => {
     setStatus("processing");
     setStatusMessage("Preparing your files...");
 
-    // Start background service for Android to keep transfer alive
-    startBackgroundService('send', selectedFiles.length);
-
     try {
       // Send all selected file paths
       const filePaths = selectedFiles.map(f => f.path);
@@ -315,8 +311,6 @@ const FileSend: React.FC = () => {
       logger.error("FileSend", "Error sending files", error);
       setStatus("error");
       setStatusMessage(`Error: ${error}`);
-      // Stop service on error
-      stopBackgroundService();
     }
   };
 

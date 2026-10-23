@@ -31,6 +31,10 @@ struct ListArgs: Decodable {
   let paths: [String]
 }
 
+struct TransferArgs: Decodable {
+  let on: Bool
+}
+
 struct CopyInArgs: Decodable {
   let bookmark: String
   let src: String
@@ -125,6 +129,28 @@ class IosFolderPlugin: Plugin, UIDocumentPickerDelegate {
   // MARK: Commands
 
   /// Copies the picked folder to `dest/<folder name>` and returns that path.
+  private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+  /// While a transfer runs: keep the screen from auto-locking and hold a background
+  /// task, so brief trips out of the app don't interrupt it.
+  @objc public func transferActive(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(TransferArgs.self)
+    DispatchQueue.main.async {
+      let app = UIApplication.shared
+      app.isIdleTimerDisabled = args.on
+      if args.on, self.backgroundTask == .invalid {
+        self.backgroundTask = app.beginBackgroundTask(withName: "sendme-transfer") {
+          app.endBackgroundTask(self.backgroundTask)
+          self.backgroundTask = .invalid
+        }
+      } else if !args.on, self.backgroundTask != .invalid {
+        app.endBackgroundTask(self.backgroundTask)
+        self.backgroundTask = .invalid
+      }
+      invoke.resolve()
+    }
+  }
+
   @objc public func copyOut(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(CopyOutArgs.self)
     DispatchQueue.global(qos: .userInitiated).async {
