@@ -3,7 +3,7 @@
 
 // No 0/O/1/I so codes survive being read aloud; 32 divides 256, so no modulo bias.
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const CODE_LENGTH = 6; // keep in sync with FILE_TRANSFER_CONFIG.CODE_LENGTH
+const CODE_LENGTH = 8; // keep in sync with FILE_TRANSFER_CONFIG.CODE_LENGTH
 const TTL_SECONDS = 60 * 60; // codes expire after an hour
 const MAX_BLOBS = 50;
 const MAX_BLOB_LENGTH = 2000;
@@ -38,7 +38,7 @@ export default {
         blobs.every((b) => typeof b === "string" && b.length > 0 && b.length <= MAX_BLOB_LENGTH);
       if (!valid) return json({ error: "invalid blobs" }, 400);
 
-      // 32^6 codes, so a collision is rare; retry rather than overwrite a live code.
+      // 32^8 codes, so a collision is rare; retry rather than overwrite a live code.
       for (let i = 0; i < 5; i++) {
         const code = newCode();
         if (await env.CODES.get(code)) continue;

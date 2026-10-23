@@ -1,6 +1,6 @@
 # Code server (optional)
 
-Maps a short 6-character code to the sender's ticket(s), so people don't have
+Maps a short 8-character code to the sender's ticket(s), so people don't have
 to share a long ticket. The app works without it: tickets and QR codes always
 work, and the app hides the code field when this server isn't reachable.
 
@@ -21,8 +21,8 @@ Then set that address as `BASE_URL` in the app's `.env` (see `.env.example`).
 
 ```sh
 cd server && npx wrangler dev
-curl -X POST localhost:8787/api/code/ -d '{"blobs":["abc"]}'   # {"code":"K7M2QX"}
-curl localhost:8787/api/code/K7M2QX                              # {"blobs":["abc"]}
+curl -X POST localhost:8787/api/code/ -d '{"blobs":["abc"]}'   # {"code":"K7M2QX9P"}
+curl localhost:8787/api/code/K7M2QX9P                              # {"blobs":["abc"]}
 ```
 
 ## Limits

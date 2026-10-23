@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS support: file and folder picking, choosing where received files are saved
 - Android and iOS: pick where received files are saved; overwrite / keep both
   prompt when a file already exists
+- Short codes are 8 characters; the app retries a failed receive up to 3 times
 - `scripts/doctor.sh` checks the toolchain; `server/` is a free, optional
   Cloudflare Worker for short codes
 

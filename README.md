@@ -21,7 +21,7 @@ Files are transferred directly between devices using the [Iroh](https://iroh.com
 protocol, with no cloud storage involved. The sender gets a **ticket** (shown
 as text and a QR code); the receiver pastes it or scans it in the app.
 
-Optionally, a tiny server can swap the long ticket for a short 6-character
+Optionally, a tiny server can swap the long ticket for a short 8-character
 code. It is not needed: the app only offers short codes when `BASE_URL` points
 at a reachable server, and tickets always work. A free, deployable one is in
 [server/](server/README.md); the API is in [docs/SERVER_API.md](docs/SERVER_API.md).

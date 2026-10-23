@@ -374,11 +374,11 @@ const FileSend: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="flex flex-wrap justify-center items-center gap-2 text-2xl font-mono bg-muted p-4 rounded-lg my-4 w-full border border-border">
+              <div className="flex justify-center items-center gap-1.5 text-2xl font-mono bg-muted py-4 px-3 rounded-lg my-4 w-full border border-border">
                 {sendCode.split("").map((char, index) => (
                   <span
                     key={index}
-                    className="inline-flex items-center justify-center w-10 h-12 rounded-md bg-background border border-border shadow-sm"
+                    className="inline-flex flex-1 min-w-0 max-w-10 items-center justify-center h-12 rounded-md bg-background border border-border shadow-sm"
                   >
                     {char}
                   </span>

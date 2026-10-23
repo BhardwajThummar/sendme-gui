@@ -2013,17 +2013,63 @@ fn summary_name<'a>(names: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
-async fn receive_single_blob(
-    blob_str: &str,
-    file_storage_path: &str,
-    verbose: bool,
-    window: tauri::Window,
-) -> anyhow::Result<ReceiveSummary> {
-    let ticket = BlobTicket::from_str(blob_str)?;
-    let addr = ticket.node_addr().clone();
+/// Attempts at the network part of a receive (connect + download) before giving up.
+const RECEIVE_ATTEMPTS: u32 = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
-    info!("Starting file receive from node: {}", addr.node_id);
-    let _ = window.emit("download_status", "Initializing connection...");
+/// What a successful download reports, for the summary.
+struct Fetched {
+    stats: iroh_blobs::get::Stats,
+    total_files: usize,
+    payload_size: u64,
+}
+
+/// Retries `fetch_once` on failure. The store keeps what was already
+/// downloaded, so a retry resumes rather than starting over.
+async fn fetch_with_retry(
+    ticket: &BlobTicket,
+    db: &iroh_blobs::store::fs::Store,
+    verbose: bool,
+    window: &tauri::Window,
+) -> anyhow::Result<Fetched> {
+    let mut attempt = 1;
+    loop {
+        match fetch_once(ticket, db, verbose, window, attempt).await {
+            Ok(fetched) => return Ok(fetched),
+            Err(e) if attempt >= RECEIVE_ATTEMPTS => return Err(e),
+            Err(e) => {
+                warn!("Receive attempt {attempt}/{RECEIVE_ATTEMPTS} failed: {e:#}");
+                attempt += 1;
+                let _ = window.emit(
+                    "download_status",
+                    format!("Connection failed, retrying ({attempt}/{RECEIVE_ATTEMPTS})..."),
+                );
+                tokio::time::sleep(Duration::from_secs(2 * (u64::from(attempt) - 1))).await;
+            }
+        }
+    }
+}
+
+/// One attempt: fresh endpoint, connect to the sender and download into `db`.
+async fn fetch_once(
+    ticket: &BlobTicket,
+    db: &iroh_blobs::store::fs::Store,
+    verbose: bool,
+    window: &tauri::Window,
+    attempt: u32,
+) -> anyhow::Result<Fetched> {
+    let addr = ticket.node_addr().clone();
+    let window = window.clone();
+    // Keep the attempt visible, or the retry message is overwritten within seconds.
+    let attempt_note = if attempt > 1 {
+        format!(" (attempt {attempt}/{RECEIVE_ATTEMPTS})")
+    } else {
+        String::new()
+    };
+    let _ = window.emit(
+        "download_status",
+        format!("Initializing connection{attempt_note}..."),
+    );
 
     let secret_key = get_or_create_secret(verbose)?;
     let mut builder = Endpoint::builder()
@@ -2036,17 +2082,16 @@ async fn receive_single_blob(
     }
 
     let endpoint = builder.bind().await?;
-    let cfg = config();
-    let dir_name = format!(
-        "{}get-{}",
-        cfg.storage.temp_dir_prefix,
-        ticket.hash().to_hex()
+    let _ = window.emit(
+        "download_status",
+        format!("Connecting to sender{attempt_note}..."),
     );
-    let iroh_data_dir = CWD.join(dir_name);
-    let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
-
-    let _ = window.emit("download_status", "Connecting to sender...");
-    let connection = endpoint.connect(addr, iroh_blobs::protocol::ALPN).await?;
+    let connection = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        endpoint.connect(addr, iroh_blobs::protocol::ALPN),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Timed out connecting to the sender"))??;
     let hash_and_format = HashAndFormat {
         hash: ticket.hash(),
         format: ticket.format(),
@@ -2151,9 +2196,47 @@ async fn receive_single_blob(
     });
 
     let get_conn = || async move { Ok(connection) };
-    let stats = iroh_blobs::get::db::get_to_db(&db, get_conn, &hash_and_format, progress)
+    let stats = iroh_blobs::get::db::get_to_db(db, get_conn, &hash_and_format, progress)
         .await
         .map_err(|e| show_get_error(anyhow::anyhow!(e)))?;
+
+    Ok(Fetched {
+        stats,
+        total_files,
+        payload_size,
+    })
+}
+
+async fn receive_single_blob(
+    blob_str: &str,
+    file_storage_path: &str,
+    verbose: bool,
+    window: tauri::Window,
+) -> anyhow::Result<ReceiveSummary> {
+    let ticket = BlobTicket::from_str(blob_str)?;
+    info!(
+        "Starting file receive from node: {}",
+        ticket.node_addr().node_id
+    );
+
+    let cfg = config();
+    let dir_name = format!(
+        "{}get-{}",
+        cfg.storage.temp_dir_prefix,
+        ticket.hash().to_hex()
+    );
+    let iroh_data_dir = CWD.join(dir_name);
+    let db = iroh_blobs::store::fs::Store::load(&iroh_data_dir).await?;
+
+    let Fetched {
+        stats,
+        total_files,
+        payload_size,
+    } = fetch_with_retry(&ticket, &db, verbose, &window).await?;
+    let hash_and_format = HashAndFormat {
+        hash: ticket.hash(),
+        format: ticket.format(),
+    };
 
     let collection = Collection::load_db(&db, &hash_and_format.hash).await?;
     let received_name = summary_name(collection.iter().map(|(name, _)| name.as_str()));

@@ -96,7 +96,9 @@ impl Default for PlatformConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            base_url: env_or_default("BASE_URL", ""),
+            // Runtime env first (desktop .env); phones have none, so a build-time
+            // `BASE_URL=... yarn android:build` is the fallback.
+            base_url: env_or_default("BASE_URL", option_env!("BASE_URL").unwrap_or("")),
             timeout_secs: env_or_default_parsed("API_TIMEOUT_SECS", 30),
         }
     }
