@@ -9,18 +9,11 @@ prerequisites and running the app locally.
 
 ## Before opening a PR
 
-CI runs these checks on every push — run them locally first:
+Run the same checks CI runs (TypeScript, formatting, clippy, tests):
 
 ```bash
-# TypeScript
-yarn tsc --noEmit
-
-# Rust, from src-tauri/
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Full build
-yarn build
+scripts/ci-local.sh          # a few minutes
+scripts/ci-local.sh --full   # also a full `yarn tauri build`
 ```
 
 ## Making changes

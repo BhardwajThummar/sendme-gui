@@ -69,8 +69,10 @@ const FileReceive: React.FC = () => {
     speed: string;
   } | null>(null);
   const [_isAndroid, setIsAndroid] = useState(false);
-  // Raw ticket, pasted or scanned (no server configured case)
+  // Raw ticket, pasted or scanned
   const [ticketInput, setTicketInput] = useState<string>("");
+  // Short codes need a reachable code server; hidden until we know it is.
+  const [codesAvailable, setCodesAvailable] = useState<boolean>(false);
   const [showScanner, setShowScanner] = useState<boolean>(false);
   // Files that already exist in the save location; asks what to do
   const [conflict, setConflict] = useState<{ count: number; names: string[] } | null>(null);
@@ -257,6 +259,12 @@ const FileReceive: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    invoke<boolean>("code_server_available")
+      .then(setCodesAvailable)
+      .catch(() => setCodesAvailable(false));
+  }, []);
+
   // Handle input change for code fields
   const handleCodeChange = (index: number, value: string) => {
     // Only allow alphanumeric characters
@@ -380,7 +388,9 @@ const FileReceive: React.FC = () => {
     if (!trimmedTicket && fullCode.length !== FILE_TRANSFER_CONFIG.CODE_LENGTH) {
       setStatus("error");
       setStatusMessage(
-        `Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code, or paste/scan a ticket`
+        codesAvailable
+          ? `Please enter a complete ${FILE_TRANSFER_CONFIG.CODE_LENGTH}-character code, or paste/scan a ticket`
+          : "Please paste or scan a ticket"
       );
       return;
     }
@@ -572,6 +582,7 @@ const FileReceive: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
+          {codesAvailable && (
           <div className="space-y-3">
             <h3 className="text-base font-medium text-center">
               Enter 6-character Code
@@ -598,13 +609,20 @@ const FileReceive: React.FC = () => {
               Code is case-insensitive and can be pasted
             </p>
           </div>
+          )}
 
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-border" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
+            {codesAvailable ? (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-muted-foreground">or</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+            ) : (
+              <h3 className="text-base font-medium text-center">
+                Paste or scan a ticket
+              </h3>
+            )}
             <div className="flex items-center gap-2">
               <Input
                 type="text"
