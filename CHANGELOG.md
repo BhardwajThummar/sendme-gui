@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- iOS support: file and folder picking, choosing where received files are saved
+- Android and iOS: pick where received files are saved; overwrite / keep both
+  prompt when a file already exists
+- `scripts/doctor.sh` checks the toolchain; `server/` is a free, optional
+  Cloudflare Worker for short codes
+
+### Changed
+
+- Short codes are only offered when the code server is reachable; tickets and
+  QR codes always work, and sending no longer fails when the server is down
+- The Download Complete screen shows what was actually received
+
+### Removed
+
+- Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,
+  `build-all.sh`)
+
 ## [0.1.1] - 2025-10-11
 
 ### Added

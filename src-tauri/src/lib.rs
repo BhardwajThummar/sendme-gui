@@ -617,6 +617,12 @@ fn resolve_file_conflict(choice: String) {
     sendme::resolve_conflict(&choice);
 }
 
+/// Whether short codes can be used (a code server is configured and reachable).
+#[tauri::command]
+async fn code_server_available() -> bool {
+    sendme::code_server_available().await
+}
+
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
     let path = Path::new(&path);
@@ -801,6 +807,7 @@ pub fn run() {
             get_downloads_dir,
             get_file_size,
             resolve_file_conflict,
+            code_server_available,
             resolve_content_uri,
             #[cfg(target_os = "android")]
             pick_android_folder,

@@ -4,6 +4,8 @@ Setting `BASE_URL` points the app at a small backend that maps a
 short, human-typeable code to one or more Iroh blob tickets, so senders
 don't have to share the (long) raw ticket text.
 
+A free reference implementation (Cloudflare Worker) is in [`server/`](../server/).
+
 This is entirely optional. With no `BASE_URL` set, the app shares the raw
 ticket(s) directly as text and a QR code instead. Anyone can implement
 this contract to self-host a code-exchange server; the client code lives in
@@ -39,6 +41,13 @@ Response body:
 Looks up the tickets previously stored under `code`. Return a 404 (or any
 non-2xx status) if the code is unknown or has expired — the client surfaces
 this as a download error.
+
+## Reachability
+
+The app sends `GET {BASE_URL}/` with a 3 second timeout. Any HTTP response
+(even a 404) counts as reachable; a connection error or timeout means the
+app hides the short-code field. Sending also falls back to a raw ticket if a
+code request fails.
 
 ## Notes for implementers
 

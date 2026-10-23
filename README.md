@@ -9,7 +9,7 @@ A modern, secure peer-to-peer file transfer application built with Tauri v2, Rea
 ## Features
 
 - 🔒 **Secure P2P Transfer**: Direct file sharing using Iroh protocol
-- 📱 **Cross-Platform**: Desktop (macOS, Windows, Linux) and Android support
+- 📱 **Cross-Platform**: Desktop (macOS, Windows, Linux), Android and iOS
 - ⚡ **Fast & Modern**: Built with Tauri v2 and React
 - 🎨 **Beautiful UI**: Clean interface with Tailwind CSS
 - 🌐 **No Cloud Required**: Direct device-to-device transfers
@@ -18,47 +18,38 @@ A modern, secure peer-to-peer file transfer application built with Tauri v2, Rea
 ## How sharing works
 
 Files are transferred directly between devices using the [Iroh](https://iroh.computer/)
-protocol — there's no cloud storage involved. To hand off the connection
-details (a "blob ticket") to the receiving device, this app supports two
-modes:
+protocol, with no cloud storage involved. The sender gets a **ticket** (shown
+as text and a QR code); the receiver pastes it or scans it in the app.
 
-- **No server configured (default)**: the sender gets the raw ticket as
-  text and a QR code; the receiver pastes it or scans it in-app.
-- **Server configured** (`BASE_URL` env var): the sender instead gets a
-  short numeric code, exchanged via a small backend that maps codes to
-  tickets. This is optional and not required to use the app — see
-  [docs/SERVER_API.md](docs/SERVER_API.md) if you want to self-host one.
+Optionally, a tiny server can swap the long ticket for a short 6-character
+code. It is not needed: the app only offers short codes when `BASE_URL` points
+at a reachable server, and tickets always work. A free, deployable one is in
+[server/](server/README.md); the API is in [docs/SERVER_API.md](docs/SERVER_API.md).
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 18+ and Yarn
-- Rust 1.70+
-- Tauri CLI
-
-### Development
-
 ```bash
-# Install dependencies
+scripts/doctor.sh        # checks your toolchain and says what to install
 yarn install
-
-# Run desktop app
-yarn tauri dev
-
-# Run Android app
-yarn android:dev
+yarn tauri dev           # desktop
 ```
 
-### Building
+Android and iOS are optional extras that `doctor.sh` also checks:
 
-```bash
-# Build desktop app
-yarn build
+| Platform | Needs | Run | Build |
+|----------|-------|-----|-------|
+| Desktop | Node 18+, Yarn, Rust | `yarn tauri dev` | `yarn build` |
+| Android | Android Studio (SDK + NDK), `ANDROID_HOME`, `NDK_HOME` | `yarn android:dev` | `yarn android:build` |
+| iOS (macOS only) | Xcode, `xcodegen`, an Apple Team ID | `yarn ios:dev` | `yarn ios:build` |
 
-# Build Android app
-yarn android:build
-```
+For iOS, replace `YOUR_TEAM_ID` (`DEVELOPMENT_TEAM`) in
+`src-tauri/gen/apple/project.yml` with your own Apple Team ID locally; don't
+commit it.
+
+If the Rust build fails in the `ring` crate, a global `CC` (such as `zig cc`)
+is the usual cause: run with `CC=cc CXX=c++`.
+
+Before opening a PR, run `scripts/ci-local.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Version Management
 
@@ -121,8 +112,8 @@ GitHub Actions will automatically build and publish the release. See [.github/RE
 │   ├── src/               # Rust source code
 │   ├── Cargo.toml         # Rust dependencies
 │   └── tauri.conf.json    # Tauri configuration
-├── scripts/               # Build and utility scripts
-│   └── version.sh         # Version management script
+├── server/                # Optional short-code server (Cloudflare Worker)
+├── scripts/               # doctor.sh, ci-local.sh, version and packaging scripts
 ├── CHANGELOG.md           # Release notes
 ├── VERSIONING.md          # Versioning guide
 └── package.json           # Node dependencies
@@ -160,6 +151,8 @@ yarn prettier --write .
 | `yarn tauri` | Run Tauri CLI commands |
 | `yarn android:dev` | Run on Android device/emulator |
 | `yarn android:build` | Build Android APK |
+| `yarn ios:dev` | Run on an iOS simulator/device (macOS) |
+| `yarn ios:build` | Build the iOS app (macOS) |
 | `yarn version:check` | Check current version |
 | `yarn version:patch` | Bump patch version |
 | `yarn version:minor` | Bump minor version |
@@ -171,6 +164,7 @@ yarn prettier --write .
 - [CHANGELOG.md](CHANGELOG.md) - Release notes
 - [.github/RELEASE.md](.github/RELEASE.md) - Release process guide
 - [.env.example](.env.example) - Environment configuration
+- [docs/SERVER_API.md](docs/SERVER_API.md) - Optional short-code server API
 
 ## Contributing
 

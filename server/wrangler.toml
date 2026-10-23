@@ -1,0 +1,7 @@
+name = "sendme-codes"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# The KV namespace is created automatically on first `wrangler deploy`.
+[[kv_namespaces]]
+binding = "CODES"

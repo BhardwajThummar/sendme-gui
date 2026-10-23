@@ -1340,6 +1340,23 @@ pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> 
     }
 }
 
+/// True if a code server is configured and answers. The UI only offers
+/// short codes when this holds; tickets and QR always work.
+pub async fn code_server_available() -> bool {
+    let base = &config().api.base_url;
+    if base.is_empty() {
+        return false;
+    }
+    // Any HTTP response (even a 404) means the server is up.
+    let Ok(client) = Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    else {
+        return false;
+    };
+    client.get(base).send().await.is_ok()
+}
+
 /// True if every comma-separated segment of `code` parses as a raw blob
 /// ticket, meaning it was produced without a code-exchange server.
 fn looks_like_raw_tickets(code: &str) -> bool {

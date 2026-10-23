@@ -12,6 +12,8 @@
     "android:dev": "tauri android dev",
     "android:build": "tauri android build",
     "android:run": "tauri android run",
+    "ios:dev": "tauri ios dev",
+    "ios:build": "tauri ios build",
     "version": "bash ./scripts/version.sh",
     "version:patch": "bash ./scripts/version.sh patch",
     "version:minor": "bash ./scripts/version.sh minor",
