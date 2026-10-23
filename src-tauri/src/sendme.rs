@@ -1317,16 +1317,27 @@ pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> 
         cfg.api.base_url
     );
 
-    let response = client
-        .post(format!("{}/api/code/", cfg.api.base_url))
-        .json(&payload)
-        .send()
-        .await?
-        .json::<BlobResponse>()
-        .await?;
-
-    info!("Blobs created successfully with code: {}", response.code);
-    Ok(response.code)
+    let request = async {
+        client
+            .post(format!("{}/api/code/", cfg.api.base_url))
+            .json(&payload)
+            .send()
+            .await?
+            .json::<BlobResponse>()
+            .await
+    };
+    match request.await {
+        Ok(response) => {
+            info!("Blobs created successfully with code: {}", response.code);
+            Ok(response.code)
+        }
+        // Raw tickets work without the server (see `get_blob`), so an
+        // unreachable server shouldn't block sending.
+        Err(e) => {
+            warn!("Code server unavailable ({e}), returning raw ticket(s)");
+            Ok(payload.blobs.join(","))
+        }
+    }
 }
 
 /// True if every comma-separated segment of `code` parses as a raw blob
