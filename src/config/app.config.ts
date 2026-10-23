@@ -54,7 +54,7 @@ export const LOGGING_CONFIG = {
  */
 export const FILE_TRANSFER_CONFIG = {
   // Code length for send/receive
-  CODE_LENGTH: 6,
+  CODE_LENGTH: 8,
 
   // Maximum file size display in bytes
   MAX_DISPLAY_SIZE: 1024 * 1024 * 1024 * 10, // 10GB
