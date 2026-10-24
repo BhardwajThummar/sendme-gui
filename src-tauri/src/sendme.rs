@@ -1589,8 +1589,15 @@ fn summary_name<'a>(names: impl Iterator<Item = &'a str>) -> String {
 }
 
 /// Attempts at the network part of a receive (connect + download) before giving up.
-const RECEIVE_ATTEMPTS: u32 = 3;
+/// A phone that sleeps mid-transfer is common, and each resumed attempt is cheap
+/// (it asks only for what is missing), so be persistent.
+const RECEIVE_ATTEMPTS: u32 = 5;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// A download that receives nothing for this long is treated as dead and retried.
+/// Without it a connection that dies silently (e.g. the phone's screen locked and
+/// iOS suspended the app) leaves the transfer "Receiving..." forever: only an error
+/// triggers a retry, and a dead connection never produces one.
+const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// What a successful download reports, for the summary.
 struct Fetched {
@@ -1709,10 +1716,13 @@ async fn fetch_once(
             }
         }));
 
-        let (_hash_seq, sizes) =
-            get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32, None)
-                .await
-                .map_err(log_get_error)?;
+        let (_hash_seq, sizes) = tokio::time::timeout(
+            STALL_TIMEOUT,
+            get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32, None),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Transfer stalled: the sender stopped answering"))?
+        .map_err(log_get_error)?;
         let total_size = sizes.iter().copied().sum::<u64>();
         // the first entry is the collection's own bookkeeping, then come the files
         let payload_size = sizes.iter().skip(1).copied().sum::<u64>();
@@ -1732,7 +1742,15 @@ async fn fetch_once(
         let mut last_update = Instant::now();
         let started = Instant::now();
         let mut stats = Stats::default();
-        while let Some(item) = stream.next().await {
+        loop {
+            let item = match tokio::time::timeout(STALL_TIMEOUT, stream.next()).await {
+                Ok(Some(item)) => item,
+                Ok(None) => break,
+                Err(_) => anyhow::bail!(
+                    "Transfer stalled: no data for {} seconds",
+                    STALL_TIMEOUT.as_secs()
+                ),
+            };
             match item {
                 GetProgressItem::Progress(offset) => {
                     // Update every 100ms to avoid too many events
