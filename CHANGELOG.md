@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accident (`scripts/ci-local.sh` checks this)
 - README rewritten: shorter, with screenshots
 
+- The receive screen says whether the transfer is direct or going through a relay
+  (relayed transfers are slower), as upstream sendme does
+- The code-server client has a timeout (`API_TIMEOUT_SECS`, now 10 s) and the
+  HTTP stack is current: `reqwest 0.13` on `ring`, which removes a second,
+  older copy of rustls, hyper and h2 from the build
+- Debug builds optimise dependencies, so hashing a large file is about ten times
+  faster during development
+
 ### Removed
 
 - Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,
