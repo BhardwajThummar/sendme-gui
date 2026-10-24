@@ -13,16 +13,28 @@ Done on 2026-10-24, folder transfers checked file by file against the originals:
 - iPhone to Mac, folder picked with the in-app picker, ticket copied through the
   clipboard (4 files, 120 MB, nested folders): identical.
 
+- Mac to iPhone over Wi-Fi, 1 GB, with the app restarted mid-transfer: it resumed
+  from the 387 MB already stored (only the missing 101 MB went over the network in
+  the first 8 seconds); the final file's SHA-256 matched. The receive screen showed
+  "Connected directly to the sender".
+- **Background behaviour (receiving):** with the app sent to the home screen and the
+  screen on, the transfer ran at full speed (4.75 vs 4.80 MB/s). With the screen
+  locked it kept going for about 30 seconds (the background time the app asks iOS
+  for) and then iOS froze the app, so the transfer stopped. Before the stall fix it
+  then stayed stuck at "Receiving..." forever, even after unlocking. Now, once the
+  phone is unlocked, the app notices the dead connection within 30 seconds,
+  reconnects and continues from where it stopped, without any tap (1 GB, SHA-256
+  matched).
+
 Still to check on the iPhone:
 
-- [ ] Background behaviour: start a transfer, lock the phone or switch apps, and
-      check what happens. iOS suspends background apps after a short while no matter
-      what, so a long transfer can pause when the app isn't on screen. The app keeps
-      the screen from auto-locking and asks iOS for extra background time while a
-      transfer runs, but this has only been compiled, not run on a device.
+- [ ] The iPhone as the **sender** with its screen locked or the app in the
+      background: a suspended sender cannot answer, so the receiver retries (5
+      attempts over roughly two minutes) and gives up if the phone stays locked
+      that long. The sender app needs to stay open and unlocked while sharing.
+- [ ] A long lock (several minutes) while receiving.
 - [ ] iCloud Drive and other providers as the iOS save location (only the app's own
       folder has been tried).
-- [ ] The direct/relay line on the receive screen (added in the upstream sync).
 - [ ] `UIBackgroundModes` (`fetch`, `processing`) in `Info.plist` aren't used by any
       feature. Remove them before an App Store submission, or Apple may question them.
 
@@ -76,3 +88,18 @@ shows the phone as connected over `localNetwork`, and install, launch and
 - [ ] Pass `BASE_URL` (the code server address) when building the mobile apps, or
       they will offer tickets and QR codes only.
 - [ ] Decide the version and tag, build signed artifacts.
+
+### Driving the iPhone from the Mac
+
+WebDriverAgent (Appium's UI-automation server) gives screenshots and taps on a real
+iPhone, which `devicectl` cannot. It is third-party code that gets installed on the
+phone, so only do it on a test phone you control. Build it with
+`xcodebuild -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner
+-destination id=<device> DEVELOPMENT_TEAM=<team id>
+PRODUCT_BUNDLE_IDENTIFIER=<your own id> -allowProvisioningUpdates
+-allowProvisioningDeviceRegistration build-for-testing`, then run it with
+`test-without-building` and keep that process running. On the phone, turn on
+Settings > Developer > Enable UI Automation. It serves on `http://<phone ip>:8100`
+(`/screenshot`, `/session/<id>/wda/tap`, `/wda/lock`, ...). It cannot unlock a phone
+that has a passcode. If your shell exports `CC="zig cc"`, run `xcodebuild` with
+`env -u CC -u CXX -u LD`.

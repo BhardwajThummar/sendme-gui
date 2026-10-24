@@ -43,6 +43,7 @@ pub fn friendly_message(error: &str) -> String {
         "reset by peer",
         "broken pipe",
         "send side no longer has",
+        "stalled",
         "lost",
     ]) {
         "Couldn't reach the sender. Check that you're both online and that the sender's app is still open and sharing, then try again."
@@ -77,6 +78,12 @@ mod tests {
         ] {
             assert!(friendly_message(e).contains("reach the sender"), "{e}");
         }
+    }
+
+    #[test]
+    fn a_stalled_transfer_is_a_connection_problem() {
+        assert!(friendly_message("Transfer stalled: no data for 30 seconds")
+            .contains("reach the sender"));
     }
 
     #[test]

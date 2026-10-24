@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appeared and iOS 27's web view does not paint a live `<video>`
 - The Copy Code button now says "Copied" (the message it used to show was hidden)
 
+- A download that goes quiet for 30 seconds (for example the phone locked and iOS
+  froze the app) is now treated as dead and retried from where it stopped, up to 5
+  attempts. Before, it stayed on "Receiving..." forever because only errors
+  triggered a retry
+
 ### Removed
 
 - Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,
