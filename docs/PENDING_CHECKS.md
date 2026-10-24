@@ -63,6 +63,15 @@ EnableWifiDebugging --udid <id>`. After unplugging, `xcrun devicectl list device
 shows the phone as connected over `localNetwork`, and install, launch and
 `devicectl device copy` all work (an install takes about 3 seconds).
 
+## Tested on a real Android phone (Galaxy Note10, Android 12), 2026-10-24
+
+- Receive from the Mac over Wi-Fi with a code server configured (the receive screen
+  shows the 8 code boxes, so HTTPS to the server works), 600 MB: the screen was
+  locked for 50 seconds in the middle and the transfer kept running at full speed;
+  every file's SHA-256 matched.
+- This run caught a panic: reqwest 0.13's default certificate checker needs JNI
+  set-up on Android. The code-server client now uses bundled root certificates.
+
 ## Needs Windows and Linux machines
 
 - [ ] Build and run on Windows (the README says it's supported; it has never been
