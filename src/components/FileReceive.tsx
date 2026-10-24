@@ -83,6 +83,8 @@ const FileReceive: React.FC = () => {
     speed: string;
     eta: string;
   } | null>(null);
+  // How this transfer reaches the sender; "relay" is slower than "direct".
+  const [connectionPath, setConnectionPath] = useState<"direct" | "relay" | null>(null);
 
   // Create refs for each input field
   const inputRefs = useRef<(HTMLInputElement | null)[]>(
@@ -156,6 +158,14 @@ const FileReceive: React.FC = () => {
           setStatusMessage("Starting download...");
           setProgress(0);
           setLiveStats(null);
+          setConnectionPath(null);
+        })
+      );
+
+      // Listen for how the transfer is connected (straight to the sender, or via a relay)
+      unlisteners.push(
+        await listen<"direct" | "relay">("connection_path", (event) => {
+          setConnectionPath(event.payload);
         })
       );
 
@@ -425,6 +435,7 @@ const FileReceive: React.FC = () => {
     setProgress(0);
     setDownloadComplete(false);
     setDownloadStats(null);
+    setConnectionPath(null);
 
     // Focus the first input again
     setTimeout(() => {
@@ -740,6 +751,14 @@ const FileReceive: React.FC = () => {
                     </div>
                   )}
                 </div>
+              )}
+
+              {connectionPath && (
+                <p className="text-xs text-center text-muted-foreground">
+                  {connectionPath === "direct"
+                    ? "Connected directly to the sender"
+                    : "Connected through a relay (can be slower)"}
+                </p>
               )}
 
               <p className="text-xs text-center text-muted-foreground pt-1">

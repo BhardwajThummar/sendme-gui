@@ -51,7 +51,11 @@ data-encoding = "2.6.0"
 n0-future = "0.3"
 dirs = "7.0"
 lazy_static = "1.4"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+# "rustls-no-provider" like iroh: the default "rustls" feature drags in aws-lc (C code),
+# which is painful to cross-compile for Android and iOS. The ring provider is installed
+# in sendme::http_client().
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 dotenv = "0.15.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -62,3 +66,9 @@ tauri-plugin-ios-folder = { path = "plugins/ios-folder" }
 
 [dev-dependencies]
 tempfile = "3"
+
+# Debug builds run dependencies unoptimised, which makes hashing (blake3) about ten
+# times slower: a 10 GB import took over ten minutes. Optimise only the dependencies;
+# our own crate stays fast to rebuild.
+[profile.dev.package."*"]
+opt-level = 3

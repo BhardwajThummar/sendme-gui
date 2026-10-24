@@ -35,7 +35,7 @@ use iroh_blobs::{
     ticket::BlobTicket,
     BlobFormat, BlobsProtocol, Hash,
 };
-use n0_future::{FuturesUnordered, StreamExt};
+use n0_future::{task::AbortOnDropHandle, FuturesUnordered, StreamExt};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -575,7 +575,8 @@ async fn import_with_window(
                 anyhow::Ok((name, temp_tag, item_size))
             }
         })
-        .buffered_unordered(num_cpus::get())
+        // capped: each import holds a file open, and macOS allows only 256 by default
+        .buffered_unordered(num_cpus::get().clamp(1, 16))
         .collect::<Vec<_>>()
         .await
         .into_iter()
@@ -1027,6 +1028,21 @@ use std::error::Error;
 
 use reqwest::Client;
 
+/// An HTTP client for the code server. Installs the TLS provider on first use
+/// (reqwest is built without one, see Cargo.toml) and applies the configured
+/// timeout, so a hung server cannot hang a send.
+fn http_client(timeout: Duration) -> Client {
+    static TLS: std::sync::Once = std::sync::Once::new();
+    TLS.call_once(|| {
+        // Fails only if a provider is already installed, which is fine.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+    Client::builder()
+        .timeout(timeout)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 #[derive(Serialize)]
 struct BlobRequest {
     blobs: Vec<String>,
@@ -1055,7 +1071,7 @@ pub async fn create_blobs(blobs: Vec<String>) -> Result<String, Box<dyn Error>> 
         return Ok(blobs.join(","));
     }
 
-    let client = Client::new();
+    let client = http_client(Duration::from_secs(cfg.api.timeout_secs));
     let payload = BlobRequest { blobs };
 
     info!(
@@ -1095,13 +1111,11 @@ pub async fn code_server_available() -> bool {
         return false;
     }
     // Any HTTP response (even a 404) means the server is up.
-    let Ok(client) = Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-    else {
-        return false;
-    };
-    client.get(base).send().await.is_ok()
+    http_client(Duration::from_secs(3))
+        .get(base)
+        .send()
+        .await
+        .is_ok()
 }
 
 /// True if every comma-separated segment of `code` parses as a raw blob
@@ -1124,7 +1138,7 @@ pub async fn get_blob(code: String) -> Result<Vec<String>, Box<dyn Error>> {
         return Err("This code requires a server, but none is configured".into());
     }
 
-    let client = Client::new();
+    let client = http_client(Duration::from_secs(cfg.api.timeout_secs));
 
     debug!("Fetching blob with code: {}", code);
 
@@ -1667,6 +1681,34 @@ async fn fetch_once(
         .await
         .map_err(|_| anyhow::anyhow!("Timed out connecting to the sender"))??;
 
+        // Tell the UI whether the transfer goes straight to the sender or through a
+        // relay (slower), and when that changes (e.g. after hole punching succeeds).
+        let _path_watcher = AbortOnDropHandle::new(tokio::spawn({
+            let connection = connection.clone();
+            let window = window.clone();
+            async move {
+                let mut paths = connection.paths_stream();
+                let mut last = None;
+                while let Some(list) = paths.next().await {
+                    let relay = (&list)
+                        .into_iter()
+                        .find(|p| p.is_selected())
+                        .map(|p| p.is_relay());
+                    if relay.is_some() && relay != last {
+                        let _ = window.emit(
+                            "connection_path",
+                            if relay == Some(true) {
+                                "relay"
+                            } else {
+                                "direct"
+                            },
+                        );
+                        last = relay;
+                    }
+                }
+            }
+        }));
+
         let (_hash_seq, sizes) =
             get_hash_seq_and_sizes(&connection, &hash_and_format.hash, 1024 * 1024 * 32, None)
                 .await
@@ -1975,5 +2017,32 @@ mod roundtrip_tests {
 
         router.shutdown().await.ok();
         let _ = std::fs::remove_dir_all(work_dir);
+    }
+}
+
+#[cfg(test)]
+mod http_tests {
+    use super::*;
+
+    /// Run with `cargo test -- --ignored`. HTTPS needs the TLS provider installed in
+    /// `http_client`; without it reqwest panics, which would break short codes.
+    #[tokio::test]
+    #[ignore = "needs internet"]
+    async fn https_to_the_code_server_works() {
+        let reply = http_client(Duration::from_secs(10))
+            .get("https://sendme-codes.sendme-share.workers.dev/")
+            .send()
+            .await
+            .expect("HTTPS request")
+            .text()
+            .await
+            .expect("body");
+        assert_eq!(reply, "ok");
+    }
+
+    #[test]
+    fn building_the_client_twice_does_not_panic() {
+        let _ = http_client(Duration::from_secs(1));
+        let _ = http_client(Duration::from_secs(1));
     }
 }
