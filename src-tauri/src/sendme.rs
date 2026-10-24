@@ -1979,6 +1979,43 @@ mod roundtrip_tests {
         start_send(args, None).await.expect("start sharing")
     }
 
+    /// Manual: shares SHARE_PATH with the default relays and prints the ticket, for
+    /// testing a real device against this machine. Run with
+    /// `SHARE_PATH=... cargo test manual_share -- --ignored --nocapture`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "manual device test"]
+    async fn manual_share() {
+        let _ = isolated_home();
+        let path = std::env::var("SHARE_PATH").expect("set SHARE_PATH");
+        let args = SendArgs {
+            path: PathBuf::from(path),
+            ticket_type: AddrInfoOptions::RelayAndAddresses,
+            common: CommonArgs {
+                magic_ipv4_addr: None,
+                magic_ipv6_addr: None,
+                format: Format::Hex,
+                verbose: 0,
+                relay: RelayModeOption::Default,
+            },
+        };
+        let (ticket, _router, _dir) = start_send(args, None).await.expect("share");
+        println!("TICKET={ticket}");
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    }
+
+    /// Manual: receives TICKET into DEST (counterpart of `manual_share`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "manual device test"]
+    async fn manual_receive() {
+        let _ = isolated_home();
+        let ticket = std::env::var("TICKET").expect("set TICKET");
+        let dest = std::env::var("DEST").expect("set DEST");
+        let summary = receive_file_with_progress(ticket, dest, false, Events::none())
+            .await
+            .expect("receive");
+        println!("RECEIVED={summary:?}");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_folder_arrives_intact_and_a_second_copy_is_numbered() {
         let home = isolated_home();
