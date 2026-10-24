@@ -75,6 +75,11 @@ fn get_home_dir() -> std::path::PathBuf {
     }
 }
 
+/// Where sending and receiving keep their work folders.
+pub fn temp_root() -> std::path::PathBuf {
+    CWD.clone()
+}
+
 fn get_temp_dir() -> std::path::PathBuf {
     let cfg = config();
 
