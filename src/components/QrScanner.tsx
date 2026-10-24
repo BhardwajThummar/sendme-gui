@@ -1,7 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { logger } from "@/utils/logger";
-import { isIOS } from "@/utils/platform";
-import { cancel, Format, requestPermissions, scan } from "@tauri-apps/plugin-barcode-scanner";
 import jsQR from "jsqr";
 import { X } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
@@ -12,46 +10,29 @@ interface QrScannerProps {
 }
 
 /**
- * QR scan overlay. On iOS, delegates to the native camera scanner plugin
- * (its own full-screen UI). Everywhere else (desktop, Android) it captures
- * the camera via getUserMedia and decodes frames locally with jsQR; the
- * Android plugin needs Google Play Services to download its decoder.
+ * QR scan overlay. Captures the camera through the web view (getUserMedia) and
+ * decodes frames locally with jsQR, on every platform. The native plugin was
+ * tried on iOS and on Android: on Android it needs Google Play Services to
+ * download its decoder, and on iOS its preview view never became visible even
+ * though the camera session and the system's QR decoder were running.
  */
 const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
   const [error, setError] = useState<string>("");
+  // Shown until the first camera frame arrives
+  const [status, setStatus] = useState<string>("Starting the camera...");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number>(0);
 
   useEffect(() => {
-    if (isIOS()) {
-      let cancelled = false;
-
-      requestPermissions()
-        .then((state) => {
-          if (state !== "granted") throw new Error(`Camera permission ${state}`);
-          return scan({ formats: [Format.QRCode] });
-        })
-        .then((result) => {
-          if (!cancelled) onDetected(result.content);
-        })
-        .catch((err) => {
-          logger.error("QrScanner", "Native scan failed", err);
-          if (!cancelled) onClose();
-        });
-
-      return () => {
-        cancelled = true;
-        cancel().catch(() => {});
-      };
-    }
-
-    // Desktop/Android: getUserMedia + jsQR
     let stopped = false;
 
     const start = async () => {
       try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("this view has no camera access (mediaDevices missing)");
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" },
@@ -66,24 +47,36 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
           await videoRef.current.play();
         }
 
-        const tick = () => {
+        let frames = 0;
+        let lastDecode = 0;
+        const tick = (now: number) => {
           if (stopped) return;
 
           const video = videoRef.current;
           const canvas = canvasRef.current;
-          if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext("2d");
+          if (video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+            }
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
             if (ctx) {
+              // The canvas is the preview. iOS 27's web view did not paint the <video>
+              // element showing a live camera stream, but it paints a canvas fine.
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-              });
-              if (code) {
-                onDetected(code.data);
-                return;
+              frames += 1;
+              if (frames === 1) setStatus("");
+              // Decoding is the expensive part; ten times a second is plenty.
+              if (now - lastDecode > 100) {
+                lastDecode = now;
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                  inversionAttempts: "dontInvert",
+                });
+                if (code) {
+                  onDetected(code.data);
+                  return;
+                }
               }
             }
           }
@@ -92,7 +85,10 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
         frameRef.current = requestAnimationFrame(tick);
       } catch (err) {
         logger.error("QrScanner", "Failed to access camera", err);
-        setError("Could not access the camera. Check permissions and try again.");
+        const e = err as { name?: string; message?: string };
+        setError(
+          `Could not access the camera (${e?.name ?? "error"}: ${e?.message ?? String(err)}). Check permissions and try again.`
+        );
       }
     };
 
@@ -118,18 +114,16 @@ const QrScanner: React.FC<QrScannerProps> = ({ onDetected, onClose }) => {
         <X className="h-4 w-4" />
       </Button>
 
-      {isIOS() ? (
-        <p className="text-sm text-muted-foreground">Opening camera...</p>
-      ) : (
-        <div className="w-full max-w-sm space-y-3">
-          <video ref={videoRef} className="w-full rounded-lg border border-border" muted playsInline />
-          <canvas ref={canvasRef} className="hidden" />
-          <p className="text-xs text-center text-muted-foreground">
-            Point the camera at the sender's QR code
-          </p>
-          {error && <p className="text-xs text-center text-destructive">{error}</p>}
-        </div>
-      )}
+      <div className="w-full max-w-sm space-y-3">
+        {/* The video only feeds the canvas; it is kept (not display:none) so it keeps decoding. */}
+        <video ref={videoRef} className="absolute h-px w-px opacity-0 pointer-events-none" muted playsInline />
+        <canvas ref={canvasRef} className="w-full rounded-lg border border-border" />
+        <p className="text-xs text-center text-muted-foreground">
+          Point the camera at the sender's QR code
+        </p>
+        {status && <p className="text-xs text-center text-muted-foreground">{status}</p>}
+        {error && <p className="text-xs text-center text-destructive">{error}</p>}
+      </div>
     </div>
   );
 };

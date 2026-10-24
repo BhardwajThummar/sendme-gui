@@ -314,16 +314,18 @@ const FileSend: React.FC = () => {
     }
   };
 
-  // Copy send code to clipboard
-  const copyCodeToClipboard = () => {
-    navigator.clipboard.writeText(sendCode);
-    setStatusMessage("Code copied to clipboard!");
-
-    setTimeout(() => {
-      if (status === "success") {
-        setStatusMessage("Your files are ready to send!");
-      }
-    }, UI_CONFIG.CLIPBOARD_NOTIFICATION_DURATION);
+  // Copy send code to clipboard. The button itself says "Copied", because the
+  // status message is not visible on this screen.
+  const [copied, setCopied] = useState(false);
+  const copyCodeToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(sendCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), UI_CONFIG.CLIPBOARD_NOTIFICATION_DURATION);
+    } catch (error) {
+      logger.error("FileSend", "Could not copy to the clipboard", error);
+      setStatusMessage("Could not copy. Select the text above and copy it by hand.");
+    }
   };
 
   // Reset the send process
@@ -426,8 +428,8 @@ const FileSend: React.FC = () => {
               onClick={copyCodeToClipboard}
               className="flex items-center justify-center gap-2 w-full"
             >
-              <Copy className="h-4 w-4" />
-              Copy Code
+              {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? "Copied" : "Copy Code"}
             </Button>
 
             <Button variant="outline" onClick={handleReset} className="w-full">

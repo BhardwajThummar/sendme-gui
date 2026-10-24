@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug builds optimise dependencies, so hashing a large file is about ten times
   faster during development
 
+- iOS: the QR scanner works. It draws the camera frames onto a canvas and decodes
+  them in JavaScript, like Android; the native scanner plugin's preview never
+  appeared and iOS 27's web view does not paint a live `<video>`
+- The Copy Code button now says "Copied" (the message it used to show was hidden)
+
 ### Removed
 
 - Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,
