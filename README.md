@@ -40,7 +40,10 @@ yarn tauri dev        # desktop
 
 Optional settings go in `.env` (copy [.env.example](.env.example)). Phones have
 no `.env`, so set `BASE_URL` when building for them:
-`BASE_URL=https://your-server yarn android:build`.
+`BASE_URL=https://your-server yarn android:build`. Xcode drops shell variables, so
+for iOS add it to `.cargo/config.toml` locally (don't commit it):
+`[env]` then `BASE_URL = "https://your-server"`. Without it the app still works,
+but shows long tickets and QR codes instead of 8-character codes.
 
 If the Rust build fails in the `ring` crate, a global `CC` such as `zig cc` is the
 usual cause: run with `CC=cc CXX=c++`.

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sharing a folder no longer fails because one file in it can't be read (a dangling
+  link, a file removed meanwhile): that file is skipped and the rest is shared
+- A failed share now shows the real reason instead of "Failed to send files"
+
 ### Added
 
 - iOS support: file and folder picking, choosing where received files are saved
