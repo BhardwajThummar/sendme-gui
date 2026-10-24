@@ -526,7 +526,7 @@ async fn import_with_window(
     };
 
     // import all the files, using num_cpus workers, return names and temp tags
-    let mut names_and_tags = n0_future::stream::iter(data_sources)
+    let names_and_tags = n0_future::stream::iter(data_sources)
         .map(|(name, path)| {
             let db = db.clone();
             let emit = emit.clone();
@@ -578,9 +578,31 @@ async fn import_with_window(
         // capped: each import holds a file open, and macOS allows only 256 by default
         .buffered_unordered(num_cpus::get().clamp(1, 16))
         .collect::<Vec<_>>()
-        .await
+        .await;
+    // One unreadable file (a dangling link, a cloud-only placeholder, a file removed
+    // mid-walk) shouldn't sink a whole folder: skip it, and fail only if nothing is left.
+    let mut first_error = None;
+    let mut skipped = 0usize;
+    let mut names_and_tags: Vec<_> = names_and_tags
         .into_iter()
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::logger::warn!("Skipping a file that couldn't be read: {}", e);
+                skipped += 1;
+                first_error.get_or_insert(e);
+                None
+            }
+        })
+        .collect();
+    if names_and_tags.is_empty() {
+        if let Some(e) = first_error {
+            return Err(e);
+        }
+    }
+    if skipped > 0 {
+        crate::logger::warn!("Shared without {} unreadable file(s)", skipped);
+    }
     names_and_tags.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
     // total size of all files
     let size = names_and_tags.iter().map(|(_, _, size)| *size).sum::<u64>();

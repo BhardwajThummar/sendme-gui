@@ -106,13 +106,11 @@ async fn send_file_command(
                 // Keep background mode enabled to maintain the connection
                 Ok(ticket)
             }
-            Err(_e) => {
+            Err(e) => {
                 // Disable background mode and stop sharing if it fails
                 background_manager::sharing(&window, false);
-                let _e = sendme::stop_sharing(_state).await;
-                // Err(e.to_string())
-                // Emit error event if sending failed
-                Err("Failed to send file".to_string())
+                let _ = sendme::stop_sharing(_state).await;
+                Err(send_error_message(&e.to_string()))
             }
         }
     }
@@ -147,11 +145,11 @@ async fn send_files_command(
                 // Keep background mode enabled to maintain the connection
                 Ok(ticket)
             }
-            Err(_e) => {
+            Err(e) => {
                 // Disable background mode and stop sharing if it fails
                 background_manager::sharing(&window, false);
-                let _e = sendme::stop_sharing(_state).await;
-                Err("Failed to send files".to_string())
+                let _ = sendme::stop_sharing(_state).await;
+                Err(send_error_message(&e.to_string()))
             }
         }
     }
@@ -291,6 +289,15 @@ async fn receive_file_with_stats(
         .map_err(|e| e.to_string())?
         .map_err(|e| report_download_error(&window, &format!("{e:#}")))
     }
+}
+
+/// The message shown when sharing fails: what it means in plain words, then the
+/// real error, so a failure can be reported and diagnosed (it used to be just
+/// "Failed to send files", which hid the cause).
+#[cfg(not(target_os = "android"))]
+fn send_error_message(technical: &str) -> String {
+    logger::error!("Sharing failed: {}", technical);
+    format!("Couldn't start sharing: {technical}")
 }
 
 /// Logs the technical error, tells the UI a friendly version, and returns that
