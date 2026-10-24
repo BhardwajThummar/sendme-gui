@@ -26,12 +26,18 @@ Done on 2026-10-24, folder transfers checked file by file against the originals:
   reconnects and continues from where it stopped, without any tap (1 GB, SHA-256
   matched).
 
+- **iPhone as the sender**, 400 MB folder picked in the app, received by the Mac:
+  the iPhone kept sending for about 30 seconds after the screen locked, then froze.
+  About 90 seconds after the lock the phone was unlocked, the Mac's retry found it
+  again and finished the transfer without any action; all files' SHA-256 matched.
+  The iPhone's sender screen must stay unlocked for a long share to keep going.
+
 Still to check on the iPhone:
 
-- [ ] The iPhone as the **sender** with its screen locked or the app in the
-      background: a suspended sender cannot answer, so the receiver retries (5
-      attempts over roughly two minutes) and gives up if the phone stays locked
-      that long. The sender app needs to stay open and unlocked while sharing.
+- [ ] The iPhone as the **sender** locked for longer than about two minutes: the
+      receiver retries 5 times over roughly that long and then gives up with
+      "Couldn't reach the sender". A resumed receive after that should continue from
+      what was stored; not tried yet.
 - [ ] A long lock (several minutes) while receiving.
 - [ ] iCloud Drive and other providers as the iOS save location (only the app's own
       folder has been tried).
