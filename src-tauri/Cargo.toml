@@ -56,6 +56,9 @@ lazy_static = "1.4"
 # in sendme::http_client().
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# Bundled root certificates, like iroh. reqwest's default checker uses the platform's
+# trust store, which panics on Android without JNI setup the app does not do.
+webpki-roots = "1"
 dotenv = "0.15.0"
 
 [target.'cfg(target_os = "android")'.dependencies]

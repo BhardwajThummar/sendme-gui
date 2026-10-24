@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempts. Before, it stayed on "Receiving..." forever because only errors
   triggered a retry
 
+- The code-server client uses bundled root certificates; reqwest's default (the
+  platform trust store) panicked on Android
+
 ### Removed
 
 - Obsolete helper scripts (`fix-ios-build.sh`, `fix-cargo-permissions.sh`,

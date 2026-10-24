@@ -1028,19 +1028,26 @@ use std::error::Error;
 
 use reqwest::Client;
 
-/// An HTTP client for the code server. Installs the TLS provider on first use
-/// (reqwest is built without one, see Cargo.toml) and applies the configured
-/// timeout, so a hung server cannot hang a send.
+/// An HTTP client for the code server, with the configured timeout, so a hung
+/// server cannot hang a send.
+///
+/// TLS is set up here rather than left to reqwest's default: that default checks
+/// certificates with the platform's trust store, which panics on Android (it needs
+/// JNI setup this app does not do). Bundled Mozilla roots behave the same on every
+/// platform, as in iroh. reqwest is built without a crypto provider, see Cargo.toml.
 fn http_client(timeout: Duration) -> Client {
-    static TLS: std::sync::Once = std::sync::Once::new();
-    TLS.call_once(|| {
-        // Fails only if a provider is already installed, which is fine.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-    Client::builder()
-        .timeout(timeout)
-        .build()
-        .unwrap_or_else(|_| Client::new())
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let tls = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map(|b| b.with_root_certificates(roots).with_no_client_auth());
+
+    let mut builder = Client::builder().timeout(timeout);
+    if let Ok(tls) = tls {
+        builder = builder.use_preconfigured_tls(tls);
+    }
+    builder.build().unwrap_or_else(|_| Client::new())
 }
 
 #[derive(Serialize)]
