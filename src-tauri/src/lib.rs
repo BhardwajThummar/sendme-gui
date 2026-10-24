@@ -705,6 +705,46 @@ fn calculate_directory_size(path: &Path) -> Result<u64, std::io::Error> {
     Ok(total)
 }
 
+/// Sharing leaves a work folder (and, on phones, a copy of the picked folder) that
+/// is only removed on window close, which a phone app never gets. Nothing is
+/// sharing at startup, so sweep what earlier runs left. Download folders
+/// (`get-*`) stay: they hold partial downloads that a retry resumes.
+fn remove_stale_send_data(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    let prefix = format!("{}send-", config().storage.temp_dir_prefix);
+    let mut stale = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(sendme::temp_root()) {
+        stale.extend(
+            entries
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+                .map(|e| e.path()),
+        );
+    }
+    if let Ok(cache) = app.path().app_cache_dir() {
+        stale.push(cache.join("picked"));
+    }
+    for dir in stale {
+        // A copy of a read-only folder is read-only too, and can't be deleted as is.
+        #[cfg(unix)]
+        for entry in walkdir::WalkDir::new(&dir).into_iter().flatten() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o755));
+            // ...and so is an "immutable" flag that the copy kept.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let Ok(c) = std::ffi::CString::new(entry.path().as_os_str().as_encoded_bytes()) {
+                unsafe { libc::chflags(c.as_ptr(), 0) };
+            }
+        }
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                logger::warn!("Couldn't remove {}: {}", dir.display(), e);
+            }
+        }
+    }
+}
+
 /// Deletes temporary directories and files.
 /// On Android, cleans the entire Temp directory.
 /// On desktop, removes directories starting with temp_dir_prefix.
@@ -801,6 +841,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
 
     builder
+        .setup(|app| {
+            remove_stale_send_data(app.handle());
+            Ok(())
+        })
         // Manage our shared sender state.
         .manage(Mutex::new(SenderState::default()))
         // Initialize the store plugin
